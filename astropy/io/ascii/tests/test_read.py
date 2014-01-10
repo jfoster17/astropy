@@ -697,3 +697,56 @@ def test_header_start_exception():
                    ascii.BaseReader, ascii.FixedWidthNoHeader, ascii.Cds, ascii.Daophot]:
         with pytest.raises(ValueError):
             reader = ascii.core._get_reader(readerclass, header_start=5)
+
+def test_bad_csv_case1():
+    """
+    Test that adding the CSV reader does not break io.ascii
+
+    We want to retain the ability to read .csv files that
+    are not actually separated by commas. In this example
+    the separation character is ';'
+    """
+    data = ascii.read('t/badcsv_1.csv')
+    assert data.pformat() == [' a   b   c ',
+                             '--- --- ---',
+                             '  1   2   3',
+                             '  4   5   6']
+
+    data = Table.read('t/badcsv_1.csv',format='ascii')
+    assert data.pformat() == [' a   b   c ',
+                             '--- --- ---',
+                             '  1   2   3',
+                             '  4   5   6']
+
+
+
+def test_bad_csv_case2():
+    """
+    Test the ability of the CSV reader to handle fake .csv files
+
+    """
+    data = ascii.read('t/badcsv_2.csv')
+    assert data.pformat() == ['col1 col2 col3',
+                              '---- ---- ----',
+                              '   1    2    3',
+                              '   4    5    6']
+    data = Table.read('t/badcsv_2.csv',format='ascii.csv')
+    assert data.pformat() == ['col1 col2 col3',
+                              '---- ---- ----',
+                              '   1    2    3',
+                              '   4    5    6']
+
+
+def test_bad_csv_case3():
+    data = ascii.read('t/badcsv_3.csv',format='ascii.csv')
+    print(data)
+    assert data.pformat() == [' a   b   c ',
+                             '--- --- ---',
+                             '  1   2   3',
+                             '  4   5   6']
+    data = Table.read('t/badcsv_3.csv',format='ascii.csv')
+    assert data.pformat() == [' a   b   c ',
+                             '--- --- ---',
+                             '  1   2   3',
+                             '  4   5   6']
+
