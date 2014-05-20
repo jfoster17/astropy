@@ -45,9 +45,13 @@ from . import _docutil as __
 try:
     from . import _wcs
 except ImportError:
-    _wcs = None
+    if not _ASTROPY_SETUP_:
+        raise
+    else:
+        _wcs = None
 
 from ..utils import deprecated, deprecated_attribute
+from ..utils.compat import possible_filename
 from ..utils.exceptions import AstropyWarning, AstropyUserWarning, AstropyDeprecationWarning
 
 if _wcs is not None:
@@ -57,8 +61,8 @@ if _wcs is not None:
 
 
 __all__ = ['FITSFixedWarning', 'WCS', 'find_all_wcs',
-           'DistortionLookupTable', 'Sip', 'Tabprm', 'UnitConverter',
-           'Wcsprm', 'WCSBase', 'validate', 'WcsError', 'SingularMatrixError',
+           'DistortionLookupTable', 'Sip', 'Tabprm', 'Wcsprm',
+           'WCSBase', 'validate', 'WcsError', 'SingularMatrixError',
            'InconsistentAxisTypesError', 'InvalidTransformError',
            'InvalidCoordinateError', 'NoSolutionError',
            'InvalidSubimageSpecificationError',
@@ -70,7 +74,6 @@ if _wcs is not None:
     WCSBase = _wcs._Wcs
     DistortionLookupTable = _wcs.DistortionLookupTable
     Sip = _wcs.Sip
-    UnitConverter = _wcs.UnitConverter
     Wcsprm = _wcs.Wcsprm
     Tabprm = _wcs.Tabprm
     WcsError = _wcs.WcsError
@@ -91,16 +94,11 @@ if _wcs is not None:
             key.startswith('WCSHDO')):
             locals()[key] = val
             __all__.append(key)
-
-    UnitConverter = deprecated(
-        '0.2', name='UnitConverter', alternative='astropy.units')(
-            UnitConverter)
 else:
     WCSBase = object
     Wcsprm = object
     DistortionLookupTable = object
     Sip = object
-    UnitConverter = object
     Tabprm = object
     WcsError = None
     SingularMatrixError = None
@@ -220,7 +218,7 @@ class WCS(WCSBase):
         specified columns.  If `None`, there is no restriction.
 
     fix : bool, optional
-        When `True` (default), call `~astropy.wcs._wcs.Wcsprm.fix` on
+        When `True` (default), call `~astropy.wcs.Wcsprm.fix` on
         the resulting object to fix any non-standard uses in the
         header.  `FITSFixedWarning` Warnings will be emitted if any
         changes were made.
@@ -229,7 +227,7 @@ class WCS(WCSBase):
         Specify which potentially unsafe translations of non-standard
         unit strings to perform.  By default, performs none.  See
         `WCS.fix` for more information about this parameter.  Only
-        effective when `fix` is `True`.
+        effective when ``fix`` is `True`.
 
     Raises
     ------
@@ -249,15 +247,14 @@ class WCS(WCSBase):
     Notes
     -----
 
-    1. astropy.wcs supports arbitrary *n* dimensions for the core WCS
-       (the transformations handled by WCSLIB).  However, the Paper IV
-       lookup table and SIP distortions must be two dimensional.
-       Therefore, if you try to create a WCS object where the core WCS
-       has a different number of dimensions than 2 and that object
-       also contains a Paper IV lookup table or SIP distortion, a
-       `ValueError` exception will be raised.  To avoid this, consider
-       using the *naxis* kwarg to select two dimensions from the core
-       WCS.
+    1. astropy.wcs supports arbitrary *n* dimensions for the core WCS (the
+       transformations handled by WCSLIB).  However, the Paper IV lookup
+       table and SIP distortions must be two dimensional.  Therefore, if you
+       try to create a WCS object where the core WCS has a different number
+       of dimensions than 2 and that object also contains a Paper IV lookup
+       table or SIP distortion, a `~.exceptions.ValueError` exception will
+       be raised.  To avoid this, consider using the *naxis* kwarg to select
+       two dimensions from the core WCS.
 
     2. The number of coordinate axes in the transformation is not
        determined directly from the ``NAXIS`` keyword but instead from
@@ -276,7 +273,7 @@ class WCS(WCSBase):
        coordinate representation, then no coordinate description is
        constructed for it.
 
-       The number of axes, which is set as the `naxis` member, may
+       The number of axes, which is set as the ``naxis`` member, may
        differ for different coordinate representations of the same
        image.
 
@@ -309,7 +306,8 @@ class WCS(WCSBase):
 
             if isinstance(header, (six.text_type, six.binary_type)):
                 try:
-                    is_path = os.path.exists(header)
+                    is_path = (possible_filename(header) and
+                               os.path.exists(header))
                 except (IOError, ValueError):
                     is_path = False
 
@@ -542,7 +540,12 @@ naxis kwarg.
                         format(key, val),
                         FITSFixedWarning)
 
+    @deprecated("0.4", name="calcFootprint", alternative="calc_footprint")
     def calcFootprint(self, header=None, undistort=True, axes=None):
+        return self.calc_footprint(header=header, undistort=undistort, axes=axes,
+                                   center=True)
+
+    def calc_footprint(self, header=None, undistort=True, axes=None, center=True):
         """
         Calculates the footprint of the image on the sky.
 
@@ -552,7 +555,7 @@ naxis kwarg.
 
         Parameters
         ----------
-        header : astropy.io.fits header object, optional
+        header : `~astropy.io.fits.Header` object, optional
 
         undistort : bool, optional
             If `True`, take SIP and distortion lookup table into
@@ -564,9 +567,13 @@ naxis kwarg.
             keywords from the header that was used to create this
             `WCS` object.
 
+        center : bool, optional
+            If `True` use the center of the pixel, otherwise use the corner.
+
         Returns
         -------
         coord : (4, 2) array of (*x*, *y*) coordinates.
+            The order is counter-clockwise starting with the bottom left corner.
         """
         if axes is not None:
             naxis1, naxis2 = axes
@@ -584,18 +591,20 @@ naxis kwarg.
                 naxis1 = header.get('NAXIS1', None)
                 naxis2 = header.get('NAXIS2', None)
 
-        corners = np.zeros(shape=(4, 2), dtype=np.float64)
         if naxis1 is None or naxis2 is None:
             return None
 
-        corners[0, 0] = 1.
-        corners[0, 1] = 1.
-        corners[1, 0] = 1.
-        corners[1, 1] = naxis2
-        corners[2, 0] = naxis1
-        corners[2, 1] = naxis2
-        corners[3, 0] = naxis1
-        corners[3, 1] = 1.
+        if center == True:
+            corners = np.array([[1, 1],
+                                [1, naxis2],
+                                [naxis1, naxis2],
+                                [naxis1, 1]], dtype = np.float64)
+        else:
+            corners = np.array([[0.5, 0.5],
+                                [0.5, naxis2 + 0.5],
+                                [naxis1 + 0.5, naxis2 + 0.5],
+                                [naxis1 + 0.5, 0.5]], dtype = np.float64)
+
         if undistort:
             return self.all_pix2world(corners, 1)
         else:
@@ -959,7 +968,7 @@ naxis kwarg.
             raise ValueError(
                 "WCS does not have longitude type of 'RA', therefore " +
                 "(ra, dec) data can not be used as input")
-        if self.wcs.lattype != 'DEC':
+        if self.wcs.lattyp != 'DEC':
             raise ValueError(
                 "WCS does not have longitude type of 'DEC', therefore " +
                 "(ra, dec) data can not be used as input")
@@ -989,7 +998,7 @@ naxis kwarg.
             raise ValueError(
                 "WCS does not have longitude type of 'RA', therefore " +
                 "(ra, dec) data can not be returned")
-        if self.wcs.lattype != 'DEC':
+        if self.wcs.lattyp != 'DEC':
             raise ValueError(
                 "WCS does not have longitude type of 'DEC', therefore " +
                 "(ra, dec) data can not be returned")
@@ -1120,7 +1129,7 @@ naxis kwarg.
         Notes
         -----
         The order of the axes for the result is determined by the
-        `CTYPEia` keywords in the FITS header, therefore it may not
+        ``CTYPEia`` keywords in the FITS header, therefore it may not
         always be of the form (*ra*, *dec*).  The
         `~astropy.wcs.Wcsprm.lat`, `~astropy.wcs.Wcsprm.lng`,
         `~astropy.wcs.Wcsprm.lattyp` and `~astropy.wcs.Wcsprm.lngtyp`
@@ -1155,10 +1164,6 @@ naxis kwarg.
                    __.RA_DEC_ORDER(8),
                    __.RETURNS('sky coordinates, in degrees', 8))
 
-    @deprecated("0.0", name="all_pix2sky", alternative="all_pix2world")
-    def all_pix2sky(self, *args, **kwargs):
-        return self.all_pix2world(*args, **kwargs)
-
     def wcs_pix2world(self, *args, **kwargs):
         if self.wcs is None:
             raise ValueError("No basic WCS settings were created.")
@@ -1183,11 +1188,6 @@ naxis kwarg.
             two-argument form must be used.
 
         {1}
-
-        tolerance : float, optional
-            Tolerance of solution. Iteration terminates when the iterative
-            solver estimates that the true solution is within this many pixels
-            current estimate. Default value is 1e-6 (pixels).
 
         Returns
         -------
@@ -1223,7 +1223,7 @@ naxis kwarg.
         Notes
         -----
         The order of the axes for the result is determined by the
-        `CTYPEia` keywords in the FITS header, therefore it may not
+        ``CTYPEia`` keywords in the FITS header, therefore it may not
         always be of the form (*ra*, *dec*).  The
         `~astropy.wcs.Wcsprm.lat`, `~astropy.wcs.Wcsprm.lng`,
         `~astropy.wcs.Wcsprm.lattyp` and `~astropy.wcs.Wcsprm.lngtyp`
@@ -1232,10 +1232,6 @@ naxis kwarg.
         """.format(__.TWO_OR_MORE_ARGS('naxis', 8),
                    __.RA_DEC_ORDER(8),
                    __.RETURNS('world coordinates, in degrees', 8))
-
-    @deprecated("0.0", name="wcs_pix2sky", alternative="wcs_pix2world")
-    def wcs_pix2sky(self, *args, **kwargs):
-        return self.wcs_pix2world(*args, **kwargs)
 
     def _all_world2pix(self, world, origin, tolerance, **kwargs):
         try:
@@ -1282,6 +1278,11 @@ naxis kwarg.
 
         {1}
 
+        tolerance : float, optional
+            Tolerance of solution. Iteration terminates when the iterative
+            solver estimates that the true solution is within this many pixels
+            current estimate. Default value is 1e-6 (pixels).
+
         Returns
         -------
 
@@ -1290,7 +1291,7 @@ naxis kwarg.
         Notes
         -----
         The order of the axes for the input world array is determined by
-        the `CTYPEia` keywords in the FITS header, therefore it may
+        the ``CTYPEia`` keywords in the FITS header, therefore it may
         not always be of the form (*ra*, *dec*).  The
         `~astropy.wcs.Wcsprm.lat`, `~astropy.wcs.Wcsprm.lng`,
         `~astropy.wcs.Wcsprm.lattyp` and `~astropy.wcs.Wcsprm.lngtyp`
@@ -1353,7 +1354,7 @@ naxis kwarg.
         Notes
         -----
         The order of the axes for the input world array is determined by
-        the `CTYPEia` keywords in the FITS header, therefore it may
+        the ``CTYPEia`` keywords in the FITS header, therefore it may
         not always be of the form (*ra*, *dec*).  The
         `~astropy.wcs.Wcsprm.lat`, `~astropy.wcs.Wcsprm.lng`,
         `~astropy.wcs.Wcsprm.lattyp` and `~astropy.wcs.Wcsprm.lngtyp`
@@ -1387,10 +1388,6 @@ naxis kwarg.
         """.format(__.TWO_OR_MORE_ARGS('naxis', 8),
                    __.RA_DEC_ORDER(8),
                    __.RETURNS('pixel coordinates', 8))
-
-    @deprecated("0.0", name="wcs_sky2pix", alternative="wcs_world2pix")
-    def wcs_sky2pix(self, *args, **kwargs):
-        return self.wcs_world2pix(*args, **kwargs)
 
     def pix2foc(self, *args):
         return self._array_converter(self._pix2foc, None, *args)
@@ -1638,7 +1635,7 @@ naxis kwarg.
 
           2. Deprecated (e.g. ``CROTAn``) or non-standard usage will
              be translated to standard (this is partially dependent on
-             whether `fix` was applied).
+             whether ``fix`` was applied).
 
           3. Quantities will be converted to the units used internally,
              basically SI with the addition of degrees.
@@ -1715,16 +1712,9 @@ naxis kwarg.
         f.write(comments)
         f.write('linear\n')
         f.write('polygon(')
-        self.footprint.tofile(f, sep=',')
+        self.calc_footprint().tofile(f, sep=',')
         f.write(') # color={0}, width={1:d} \n'.format(color, width))
         f.close()
-
-    naxis1 = deprecated_attribute('naxis1', '0.2')
-    naxis2 = deprecated_attribute('naxis2', '0.2')
-
-    @deprecated('0.2', message='This method should not be public')
-    def get_naxis(self, header=None):
-        return self._get_naxis(header=header)
 
     def _get_naxis(self, header=None):
         self._naxis1 = 0
@@ -1743,33 +1733,41 @@ naxis kwarg.
         self.wcs.cd = new_cd
 
     def printwcs(self):
-        """
-        Temporary function for internal use.
-        """
-        print('WCS Keywords\n')
-        if hasattr(self.wcs, 'cd'):
-            print('CD_11  CD_12: {!r} {!r}'.format(
-                self.wcs.cd[0, 0], self.wcs.cd[0, 1]))
-            print('CD_21  CD_22: {!r} {!r}'.format(
-                self.wcs.cd[1, 0], self.wcs.cd[1, 1]))
-        else:
-            print('PC_11  PC_12: {!r} {!r}'.format(
-                self.wcs.pc[0, 0], self.wcs.pc[0, 1]))
-            print('PC_21  PC_22: {!r} {!r}'.format(
-                self.wcs.pc[1, 0], self.wcs.pc[1, 1]))
-        print('CRVAL    : {!r} {!r}'.format(
-            self.wcs.crval[0], self.wcs.crval[1]))
-        print('CRPIX    : {!r} {!r}'.format(
-            self.wcs.crpix[0], self.wcs.crpix[1]))
-        if not self.wcs.has_cd():
-            print('CDELT    : {!r} {!r}'.format(
-                self.wcs.cdelt[0], self.wcs.cdelt[1]))
-        print('NAXIS    : {!r} {!r}'.format(
-            self.naxis1, self.naxis2))
+        print("WCS Keywords\n")
+        print("Number of WCS axes: {0!r}".format(self.naxis))
+        sfmt = ': ' +  "".join(["{"+"{0}".format(i)+"!r}  " for i in range(self.naxis)])
+
+        s = 'CTYPE ' + sfmt
+        print(s.format(*self.wcs.ctype))
+
+        s = 'CRVAL ' + sfmt
+        print(s.format(*self.wcs.crval))
+
+        s = 'CRPIX ' + sfmt
+        print(s.format(*self.wcs.crpix))
+
+        if hasattr(self.wcs, 'pc'):
+            for i in range(self.naxis):
+                s = ''
+                for j in range(self.naxis):
+                    s += ''.join(['PC', str(i+1), '_', str(j+1), ' '])
+                s += sfmt
+                print(s.format(*self.wcs.pc[i]))
+            s = 'CDELT ' + sfmt
+            print(s.format(*self.wcs.cdelt))
+        elif hasattr(self.wcs, 'cd'):
+            for i in range(self.naxis):
+                s = ''
+                for j in range(self.naxis):
+                    s += "".join(['CD', str(i+1), '_', str(j+1), ' '])
+                s += sfmt
+                print(s.format(*self.wcs.cd[i]))
+
+        print('NAXIS    : {0!r} {1!r}'.format(self._naxis1, self._naxis2))
 
     def get_axis_types(self):
         """
-        Similar to `self.wcsprm.axis_types <_wcs.Wcsprm.axis_types>`
+        Similar to `self.wcsprm.axis_types <astropy.wcs.Wcsprm.axis_types>`
         but provides the information in a more Python-friendly format.
 
         Returns
@@ -1938,7 +1936,7 @@ def find_all_wcs(header, relax=True, keysel=None, fix=True,
         'pixel'.
 
     fix : bool, optional
-        When `True` (default), call `~astropy.wcs._wcs.Wcsprm.fix` on
+        When `True` (default), call `~astropy.wcs.Wcsprm.fix` on
         the resulting objects to fix any non-standard uses in the
         header.  `FITSFixedWarning` warnings will be emitted if any
         changes were made.
@@ -1947,7 +1945,7 @@ def find_all_wcs(header, relax=True, keysel=None, fix=True,
         Specify which potentially unsafe translations of non-standard
         unit strings to perform.  By default, performs none.  See
         `WCS.fix` for more information about this parameter.  Only
-        effective when `fix` is `True`.
+        effective when ``fix`` is `True`.
 
     Returns
     -------
@@ -2071,10 +2069,13 @@ def validate(source):
                 hdu.header, relax=True, fix=False, _do_set=False)
 
         for wcs in wcses:
-            wcs_results = _WcsValidateWcsResult(wcs.wcs.name)
+            wcs_results = _WcsValidateWcsResult(wcs.wcs.alt)
             hdu_results.append(wcs_results)
 
-            del __warningregistry__
+            try:
+                del __warningregistry__
+            except NameError:
+                pass
 
             with warnings.catch_warnings(record=True) as warning_lines:
                 warnings.resetwarnings()
@@ -2083,7 +2084,7 @@ def validate(source):
 
                 try:
                     WCS(hdu.header,
-                        key=wcs.wcs.name or ' ',
+                        key=wcs.wcs.alt or ' ',
                         relax=True, fix=True, _do_set=False)
                 except WcsError as e:
                     wcs_results.append(str(e))

@@ -23,6 +23,7 @@ from ... import __version__ as astropy_version
 from ...utils.collections import HomogeneousList
 from ...utils.xml.writer import XMLWriter
 from ...utils.exceptions import AstropyDeprecationWarning
+from ...utils.misc import InheritDocstrings
 
 from . import converters
 from .exceptions import (warn_or_raise, vo_warn, vo_raise, vo_reraise,
@@ -188,7 +189,7 @@ def _get_unit_format(config):
 
 ######################################################################
 # ATTRIBUTE CHECKERS
-def check_astroyear(year, field, config={}, pos=None):
+def check_astroyear(year, field, config=None, pos=None):
     """
     Raises a `~astropy.io.votable.exceptions.VOTableSpecError` if
     *year* is not a valid astronomical year as defined by the VOTABLE
@@ -213,7 +214,7 @@ def check_astroyear(year, field, config={}, pos=None):
     return True
 
 
-def check_string(string, attr_name, config={}, pos=None):
+def check_string(string, attr_name, config=None, pos=None):
     """
     Raises a `~astropy.io.votable.exceptions.VOTableSpecError` if
     *string* is not a string or Unicode string.
@@ -236,14 +237,14 @@ def check_string(string, attr_name, config={}, pos=None):
     return True
 
 
-def resolve_id(ID, id, config={}, pos=None):
+def resolve_id(ID, id, config=None, pos=None):
     if ID is None and id is not None:
         warn_or_raise(W09, W09, (), config, pos)
         return id
     return ID
 
 
-def check_ucd(ucd, config={}, pos=None):
+def check_ucd(ucd, config=None, pos=None):
     """
     Warns or raises a
     `~astropy.io.votable.exceptions.VOTableSpecError` if *ucd* is not
@@ -258,6 +259,8 @@ def check_ucd(ucd, config={}, pos=None):
     config, pos : optional
         Information about the source of the value
     """
+    if config is None:
+        config = {}
     if config.get('version_1_1_or_later'):
         try:
             ucd_mod.parse_ucd(
@@ -281,7 +284,7 @@ class _IDProperty(object):
     @property
     def ID(self):
         """
-        The XML ID_ of the element.  May be ``None`` or a string
+        The XML ID_ of the element.  May be `None` or a string
         conforming to XML ID_ syntax.
         """
         return self._ID
@@ -402,6 +405,7 @@ class _DescriptionProperty(object):
 
 ######################################################################
 # ELEMENT CLASSES
+@six.add_metaclass(InheritDocstrings)
 class Element(object):
     """
     A base class for all classes that represent XML elements in the
@@ -417,6 +421,42 @@ class Element(object):
         if config.get('version_1_1_or_later'):
             warn_or_raise(W22, W22, (), config, pos)
         warn_unknown_attrs(tag, six.iterkeys(data), config, pos)
+
+    def parse(self, iterator, config):
+        """
+        For internal use. Parse the XML content of the children of the
+        element.
+
+        Parameters
+        ----------
+        iterator : xml iterator
+            An iterator over XML elements as returned by
+            `~astropy.utils.xml.iterparser.get_xml_iterator`.
+
+        config : dict
+            The configuration dictionary that affects how certain
+            elements are read.
+
+        Returns
+        -------
+        self : Element
+            Returns self as a convenience.
+        """
+        raise NotImplementedError()
+
+    def to_xml(self, w, **kwargs):
+        """
+        For internal use. Output the element to XML.
+
+        Parameters
+        ----------
+        w : astropy.utils.xml.writer.XMLWriter object
+            An XML writer to write to.
+
+        kwargs : dict
+            Any configuration parameters to control the output.
+        """
+        raise NotImplementedError()
 
 
 class SimpleElement(Element):
@@ -493,7 +533,9 @@ class Link(SimpleElement, _IDProperty):
     _element_name = 'LINK'
 
     def __init__(self, ID=None, title=None, value=None, href=None, action=None,
-                 id=None, config={}, pos=None, **kwargs):
+                 id=None, config=None, pos=None, **kwargs):
+        if config is None:
+            config = {}
         self._config = config
         self._pos = pos
 
@@ -601,7 +643,9 @@ class Info(SimpleElementWithContent, _IDProperty, _XtypeProperty,
 
     def __init__(self, ID=None, name=None, value=None, id=None, xtype=None,
                  ref=None, unit=None, ucd=None, utype=None,
-                 config={}, pos=None, **extra):
+                 config=None, pos=None, **extra):
+        if config is None:
+            config = {}
         self._config = config
         self._pos = pos
 
@@ -763,7 +807,9 @@ class Values(Element, _IDProperty):
     name, documented below.
     """
     def __init__(self, votable, field, ID=None, null=None, ref=None,
-                 type="legal", id=None, config={}, pos=None, **extras):
+                 type="legal", id=None, config=None, pos=None, **extras):
+        if config is None:
+            config = {}
         self._config  = config
         self._pos = pos
 
@@ -988,6 +1034,10 @@ class Values(Element, _IDProperty):
         return self
 
     def is_defaults(self):
+        """
+        Are the settings on this ``VALUE`` element all the same as the
+        XML defaults?
+        """
         # If there's nothing meaningful or non-default to write,
         # don't write anything.
         return (self.ref is None and self.null is None and self.ID is None and
@@ -1085,7 +1135,9 @@ class Field(SimpleElement, _IDProperty, _NameProperty, _XtypeProperty,
                  arraysize=None, ucd=None, unit=None, width=None,
                  precision=None, utype=None, ref=None, type=None, id=None,
                  xtype=None,
-                 config={}, pos=None, **extra):
+                 config=None, pos=None, **extra):
+        if config is None:
+            config = {}
         self._config = config
         self._pos = pos
 
@@ -1370,7 +1422,7 @@ class Field(SimpleElement, _IDProperty, _NameProperty, _XtypeProperty,
     @property
     def values(self):
         """
-        A :class:`Values` instance (or ``None``) defining the domain
+        A :class:`Values` instance (or `None`) defining the domain
         of the column.
         """
         return self._values
@@ -1506,7 +1558,7 @@ class Param(Field):
 
     def __init__(self, votable, ID=None, name=None, value=None, datatype=None,
                  arraysize=None, ucd=None, unit=None, width=None,
-                 precision=None, utype=None, type=None, id=None, config={},
+                 precision=None, utype=None, type=None, id=None, config=None,
                  pos=None, **extra):
         self._value = value
         Field.__init__(self, votable, ID=ID, name=name, datatype=datatype,
@@ -1558,7 +1610,9 @@ class CooSys(SimpleElement):
     _element_name = 'COOSYS'
 
     def __init__(self, ID=None, equinox=None, epoch=None, system=None, id=None,
-                 config={}, pos=None, **extra):
+                 config=None, pos=None, **extra):
+        if config is None:
+            config = {}
         self._config = config
         self._pos = pos
 
@@ -1578,7 +1632,7 @@ class CooSys(SimpleElement):
     def ID(self):
         """
         [*required*] The XML ID of the COOSYS_ element, used for
-        cross-referencing.  May be ``None`` or a string conforming to
+        cross-referencing.  May be `None` or a string conforming to
         XML ID_ syntax.
         """
         return self._ID
@@ -1659,7 +1713,7 @@ class FieldRef(SimpleElement, _UtypeProperty, _UcdProperty):
     _utype_in_v1_2 = True
     _ucd_in_v1_2 = True
 
-    def __init__(self, table, ref, ucd=None, utype=None, config={}, pos=None,
+    def __init__(self, table, ref, ucd=None, utype=None, config=None, pos=None,
                  **extra):
         """
         *table* is the :class:`Table` object that this :class:`FieldRef`
@@ -1668,6 +1722,8 @@ class FieldRef(SimpleElement, _UtypeProperty, _UcdProperty):
         *ref* is the ID to reference a :class:`Field` object defined
         elsewhere.
         """
+        if config is None:
+            config = {}
         self._config = config
         self._pos = pos
 
@@ -1730,7 +1786,10 @@ class ParamRef(SimpleElement, _UtypeProperty, _UcdProperty):
     _utype_in_v1_2 = True
     _ucd_in_v1_2 = True
 
-    def __init__(self, table, ref, ucd=None, utype=None, config={}, pos=None):
+    def __init__(self, table, ref, ucd=None, utype=None, config=None, pos=None):
+        if config is None:
+            config = {}
+
         self._config = config
         self._pos = pos
 
@@ -1765,7 +1824,7 @@ class ParamRef(SimpleElement, _UtypeProperty, _UcdProperty):
 
     def get_ref(self):
         """
-        Lookup the :class:`Param` instance that this :class:`PARAMref`
+        Lookup the :class:`Param` instance that this :class:``PARAMref``
         references.
         """
         for param in self._table._votable.iter_fields_and_params():
@@ -1791,7 +1850,9 @@ class Group(Element, _IDProperty, _NameProperty, _UtypeProperty,
     """
 
     def __init__(self, table, ID=None, name=None, ref=None, ucd=None,
-                 utype=None, id=None, config={}, pos=None, **extra):
+                 utype=None, id=None, config=None, pos=None, **extra):
+        if config is None:
+            config = {}
         self._config     = config
         self._pos        = pos
 
@@ -1937,8 +1998,10 @@ class Table(Element, _IDProperty, _NameProperty, _UcdProperty,
     name, documented below.
     """
     def __init__(self, votable, ID=None, name=None, ref=None, ucd=None,
-                 utype=None, nrows=None, id=None, config={}, pos=None,
+                 utype=None, nrows=None, id=None, config=None, pos=None,
                  **extra):
+        if config is None:
+            config = {}
         self._config = config
         self._pos = pos
         self._empty = False
@@ -2033,6 +2096,8 @@ class Table(Element, _IDProperty, _NameProperty, _UcdProperty,
         Note that the 'fits' format, since it requires an external
         file, can not be written out.  Any file read in with 'fits'
         format will be read out, by default, in 'tabledata' format.
+
+        See :ref:`votable-serialization`.
         """
         return self._format
 
@@ -2106,11 +2171,11 @@ class Table(Element, _IDProperty, _NameProperty, _UcdProperty,
         """
         Returns True if this table doesn't contain any real data
         because it was skipped over by the parser (through use of the
-        `table_number` kwarg).
+        ``table_number`` kwarg).
         """
         return self._empty
 
-    def create_arrays(self, nrows=0, config={}):
+    def create_arrays(self, nrows=0, config=None):
         """
         Create a new array to hold the data based on the current set
         of fields, and store them in the *array* and member variable.
@@ -2619,6 +2684,14 @@ class Table(Element, _IDProperty, _NameProperty, _UcdProperty,
         return array
 
     def to_xml(self, w, **kwargs):
+        specified_format = kwargs.get('tabledata_format')
+        if specified_format is not None:
+            format = specified_format
+        else:
+            format = self.format
+        if format == 'fits':
+            format = 'tabledata'
+
         with w.tag(
             'TABLE',
             attrib=w.object_attrs(
@@ -2644,14 +2717,11 @@ class Table(Element, _IDProperty, _NameProperty, _UcdProperty,
 
             if len(self.array):
                 with w.tag('DATA'):
-                    if self.format == 'fits':
-                        self.format = 'tabledata'
-
-                    if self.format == 'tabledata':
+                    if format == 'tabledata':
                         self._write_tabledata(w, **kwargs)
-                    elif self.format == 'binary':
+                    elif format == 'binary':
                         self._write_binary(1, w, **kwargs)
-                    elif self.format == 'binary2':
+                    elif format == 'binary2':
                         self._write_binary(2, w, **kwargs)
 
             if kwargs['version_1_2_or_later']:
@@ -2748,7 +2818,7 @@ class Table(Element, _IDProperty, _NameProperty, _UcdProperty,
         Parameters
         ----------
         use_names_over_ids : bool, optional
-           When `True` use the `name` attributes of columns as the
+           When `True` use the ``name`` attributes of columns as the
            names of columns in the `astropy.table.Table` instance.
            Since names are not guaranteed to be unique, this may cause
            some columns to be renamed by appending numbers to the end.
@@ -2778,7 +2848,7 @@ class Table(Element, _IDProperty, _NameProperty, _UcdProperty,
                 while new_name in unique_names:
                     new_name = '{0}{1}'.format(name, i)
                     i += 1
-                if sys.version_info[0] < 3:
+                if six.PY2:
                     new_name = new_name.encode(
                         sys.getdefaultencoding(), 'replace')
                 unique_names.append(new_name)
@@ -2888,7 +2958,9 @@ class Resource(Element, _IDProperty, _NameProperty, _UtypeProperty,
     name, documented below.
     """
     def __init__(self, name=None, ID=None, utype=None, type='results',
-                 id=None, config={}, pos=None, **kwargs):
+                 id=None, config=None, pos=None, **kwargs):
+        if config is None:
+            config = {}
         self._config           = config
         self._pos              = pos
 
@@ -3105,7 +3177,9 @@ class VOTableFile(Element, _IDProperty, _DescriptionProperty):
     tests for building the rest of the structure depend on it.
     """
 
-    def __init__(self, ID=None, id=None, config={}, pos=None, version="1.2"):
+    def __init__(self, ID=None, id=None, config=None, pos=None, version="1.2"):
+        if config is None:
+            config = {}
         self._config             = config
         self._pos                = pos
 
@@ -3271,7 +3345,7 @@ class VOTableFile(Element, _IDProperty, _DescriptionProperty):
         return self
 
     def to_xml(self, fd, write_null_values=False,
-               compressed=False,
+               compressed=False, tabledata_format=None,
                _debug_python_based_parser=False,
                _astropy_version=None):
         """
@@ -3280,23 +3354,34 @@ class VOTableFile(Element, _IDProperty, _DescriptionProperty):
         Parameters
         ----------
         fd : str path or writable file-like object
-           Where to write the file.
+            Where to write the file.
 
         write_null_values : bool, optional
-           Deprecated and retained for backward compatibility.  When
-           `write_null_values` was `False`, invalid VOTable files
-           could be generated, so the option has just been removed
-           entirely.
+            Deprecated and retained for backward compatibility.  When
+            ``write_null_values`` was `False`, invalid VOTable files
+            could be generated, so the option has just been removed
+            entirely.
 
         compressed : bool, optional
-           When `True`, write to a gzip-compressed file.  (Default:
-           `False`)
+            When `True`, write to a gzip-compressed file.  (Default:
+            `False`)
+
+        tabledata_format : str, optional
+            Override the format of the table(s) data to write.  Must
+            be one of ``tabledata`` (text representation), ``binary`` or
+            ``binary2``.  By default, use the format that was specified
+            in each `Table` object as it was created or read in.  See
+            :ref:`votable-serialization`.
         """
         if write_null_values != False:
             warnings.warn(
                 "write_null_values has been deprecated and has no effect",
                 AstropyDeprecationWarning)
 
+        if tabledata_format is not None:
+            if tabledata_format.lower() not in (
+                    'tabledata', 'binary', 'binary2'):
+                raise ValueError("Unknown format type '{0}'".format(format))
 
         kwargs = {
             'version': self.version,
@@ -3306,6 +3391,8 @@ class VOTableFile(Element, _IDProperty, _DescriptionProperty):
                 util.version_compare(self.version, '1.2') >= 0,
             'version_1_3_or_later':
                 util.version_compare(self.version, '1.3') >= 0,
+            'tabledata_format':
+                tabledata_format,
             '_debug_python_based_parser': _debug_python_based_parser,
             '_group_number': 1}
 

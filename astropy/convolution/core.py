@@ -4,17 +4,19 @@ This module contains the convolution and filter functionalities of astropy.
 
 A few conceptual notes:
 A filter kernel is mainly characterized by its response function. In the 1D
-case we speak of "impulse response function", in the 2D case we call it
-"point spread function". This response function is given for every kernel
-by an astropy ParametricModel, which is evaluated on a grid to obtain a filter
-array, which can then be applied to binned data.
+case we speak of "impulse response function", in the 2D case we call it "point
+spread function". This response function is given for every kernel by an
+astropy `FittableModel`, which is evaluated on a grid to obtain a filter array,
+which can then be applied to binned data.
 
 The model is centered on the array and should have an amplitude such that the array
 integrates to one per default.
 
 Currently only symmetric 2D kernels are supported.
 """
-from __future__ import division
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
+
 import warnings
 import copy
 
@@ -25,6 +27,7 @@ from .utils import (discretize_model, add_kernel_arrays_1D,
 
 MAX_NORMALIZATION = 100
 
+__all__ = ['Kernel', 'Kernel1D', 'Kernel2D', 'kernel_arithmetics']
 
 class Kernel(object):
     """
@@ -41,7 +44,10 @@ class Kernel(object):
 
     def __init__(self, array):
         self._array = array
-        self._normalization = 1. / self._array.sum()
+        if self._array.sum() == 0:
+            self._normalization = np.inf
+        else:
+            self._normalization = 1. / self._array.sum()
 
     @property
     def truncation(self):
@@ -94,7 +100,7 @@ class Kernel(object):
 
         Parameters
         ----------
-        mode : str
+        mode : {'integral', 'peak'}
             One of the following modes:
                 * 'integral' (default)
                     Kernel normalized such that its integral = 1.
@@ -103,6 +109,11 @@ class Kernel(object):
         """
         # There are kernel that sum to zero and
         # the user should be warned in this case
+        if np.isinf(self._normalization):
+            warnings.warn('Kernel cannot be normalized because the '
+                          'normalization factor is infinite.',
+                          AstropyUserWarning)
+            return
         if np.abs(self._normalization) > MAX_NORMALIZATION:
             warnings.warn("Normalization factor of kernel is "
                           "exceptionally large > {0}.".format(MAX_NORMALIZATION),
@@ -110,7 +121,7 @@ class Kernel(object):
         if mode == 'integral':
             self._array *= self._normalization
         if mode == 'peak':
-            self._array /= self._array.max()
+            np.divide(self._array, self._array.max(), self.array)
             self._normalization = 1. / self._array.sum()
 
     @property
@@ -300,11 +311,11 @@ def kernel_arithmetics(kernel, value, operation):
 
     Parameters
     ----------
-    kernel : astropy.convolution.kernel
+    kernel : `astropy.convolution.Kernel`
         Kernel instance
     values : kernel, float or int
         Value to operate with
-    operation : str
+    operation : {'add', 'sub', 'mul'}
         One of the following operations:
             * 'add'
                 Add two kernels

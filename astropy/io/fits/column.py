@@ -7,14 +7,18 @@ import sys
 import warnings
 import weakref
 
+from functools import reduce
+
 import numpy as np
 from numpy import char as chararray
 
 from .card import Card
-from .util import pairwise, _is_int, _convert_array, encode_ascii
+from .util import pairwise, _is_int, _convert_array, encode_ascii, cmp
 from .verify import VerifyError
 
+from ...extern.six import string_types, iteritems
 from ...utils import lazyproperty
+from ...utils.compat import ignored
 
 
 __all__ = ['Column', 'ColDefs', 'Delayed']
@@ -78,6 +82,7 @@ KEYWORD_NAMES = ['TTYPE', 'TFORM', 'TUNIT', 'TNULL', 'TSCAL', 'TZERO',
                  'TDISP', 'TBCOL', 'TDIM']
 KEYWORD_ATTRIBUTES = ['name', 'format', 'unit', 'null', 'bscale', 'bzero',
                       'disp', 'start', 'dim']
+"""This is a list of the attributes that can be set on `Column` objects."""
 
 # TFORMn regular expression
 TFORMAT_RE = re.compile(r'(?P<repeat>^[0-9]*)(?P<format>[LXBIJKAEDCMPQ])'
@@ -226,7 +231,7 @@ class _AsciiColumnFormat(_BaseColumnFormat):
     Conversions between the two column formats can be performed using the
     ``to/from_binary`` methods on this class, or the ``to/from_ascii``
     methods on the `_ColumnFormat` class.  But again, not all conversions are
-    possible and may result in a `ValueError`.
+    possible and may result in a `~.exceptions.ValueError`.
     """
 
     def __new__(cls, format, strict=False):
@@ -344,14 +349,13 @@ class _FormatQ(_FormatP):
 
     _format_code = 'Q'
     _format_re = re.compile(_FormatP._format_re_template % _format_code)
-    _descriptor_format = '2l4'
+    _descriptor_format = '2i8'
 
 
 class Column(object):
     """
-    Class which contains the definition of one column, e.g.  `ttype`,
-    `tform`, etc. and the array containing values for the column.
-    Does not support `theap` yet.
+    Class which contains the definition of one column, e.g.  ``ttype``,
+    ``tform``, etc. and the array containing values for the column.
     """
 
     def __init__(self, name=None, format=None, unit=None, null=None,
@@ -490,7 +494,7 @@ class Column(object):
         # Validate the disp option
         # TODO: Add full parsing and validation of TDISPn keywords
         if disp is not None and null != '':
-            if not isinstance(disp, basestring):
+            if not isinstance(disp, string_types):
                 raise TypeError('Column disp option (TDISPn) must be a '
                                 'string (got %r).' % disp)
             if (isinstance(format, _AsciiColumnFormat) and
@@ -506,10 +510,9 @@ class Column(object):
                 # The 'start' option only applies to ASCII columns
                 warnings.warn('Column start option (TBCOLn) is not allowed '
                               'for binary table columns (got %r).' % start)
-            try:
+
+            with ignored(TypeError, ValueError):
                 start = int(start)
-            except (TypeError, ValueError):
-                pass
 
             if not _is_int(start) and start < 1:
                 raise TypeError('Column start option (TBCOLn) must be a '
@@ -522,7 +525,7 @@ class Column(object):
         if dim is not None and isinstance(format, _AsciiColumnFormat):
             warnings.warn('Column dim option (TDIMn) is not allowed for ASCII '
                           'table columns (got %r).' % dim)
-        if isinstance(dim, basestring):
+        if isinstance(dim, string_types):
             self._dims = _parse_tdim(dim)
         elif isinstance(dim, tuple):
             self._dims = dim
@@ -630,12 +633,10 @@ class Column(object):
             return format, format.recformat
 
         if format in NUMPY2FITS:
-            try:
+            with ignored(VerifyError):
                 # legit recarray format?
                 recformat = format
                 format = cls.from_recformat(format)
-            except VerifyError:
-                pass
 
         try:
             # legit FITS format?
@@ -666,10 +667,9 @@ class Column(object):
             # "optional" codes), but it is also strictly a valid ASCII
             # table format, then assume an ASCII table column was being
             # requested (the more likely case, after all).
-            try:
+            with ignored(VerifyError):
                 format = _AsciiColumnFormat(format, strict=True)
-            except VerifyError:
-                pass
+
             # A safe guess which reflects the existing behavior of previous
             # PyFITS versions
             guess_format = _ColumnFormat
@@ -776,6 +776,9 @@ class ColDefs(object):
 
         return object.__new__(klass)
 
+    def __getnewargs__(self):
+        return (self._arrays,)
+
     def __init__(self, input, tbtype='BinTableHDU'):
         """
         Parameters
@@ -784,7 +787,7 @@ class ColDefs(object):
         input :
             An existing table HDU, an existing ColDefs, or recarray
 
-        **(Deprecated)** tbtype : str (optional)
+        **(Deprecated)** tbtype : str, optional
             which table HDU, ``"BinTableHDU"`` (default) or
             ``"TableHDU"`` (text table).
             Now ColDefs for a normal (binary) table by default, but converted
@@ -823,8 +826,8 @@ class ColDefs(object):
         for col in columns:
             if not isinstance(col, Column):
                 raise TypeError(
-                       'Element %d in the ColDefs input is not a Column.'
-                       % input.index(col))
+                    'Element {0} in the ColDefs input is not a '
+                    'Column.'.format(columns.index(col)))
 
         self._init_from_coldefs(columns)
 
@@ -870,7 +873,7 @@ class ColDefs(object):
         # go through header keywords to pick out column definition keywords
         # definition dictionaries for each field
         col_attributes = [{} for i in range(nfields)]
-        for keyword, value in hdr.iteritems():
+        for keyword, value in iteritems(hdr):
             key = TDEF_RE.match(keyword)
             try:
                 keyword = key.group('label')
@@ -899,8 +902,8 @@ class ColDefs(object):
         return self.__class__(self, self._tbtype)
 
     def __deepcopy__(self, memo):
-        return self.__class__([copy.deepcopy(c, memo) for c in self.columns],
-                              tbtype=self._tbtype)
+        return self.__class__([copy.deepcopy(c, memo) for c in self.columns
+                               if not c._phantom], tbtype=self._tbtype)
 
     def _copy_column(self, column):
         """Utility function used currently only by _init_from_coldefs
@@ -1034,7 +1037,7 @@ class ColDefs(object):
         if not isinstance(other, (list, tuple)):
             other = [other]
         _other = [_get_index(self.names, key) for key in other]
-        indx = range(len(self))
+        indx = list(range(len(self)))
         for x in _other:
             indx.remove(x)
         tmp = [self[i] for i in indx]
@@ -1102,8 +1105,10 @@ class ColDefs(object):
 
     def change_attrib(self, col_name, attrib, new_value):
         """
-        Change an attribute (in the commonName list) of a `Column`.
+        Change an attribute (in the ``KEYWORD_ATTRIBUTES`` list) of a `Column`.
 
+        Parameters
+        ----------
         col_name : str or int
             The column name or index to change
 
@@ -1125,6 +1130,8 @@ class ColDefs(object):
         """
         Change a `Column`'s name.
 
+        Parameters
+        ----------
         col_name : str
             The current name of the column
 
@@ -1145,6 +1152,8 @@ class ColDefs(object):
         """
         Change a `Column`'s unit.
 
+        Parameters
+        ----------
         col_name : str or int
             The column name or index
 
@@ -1166,14 +1175,14 @@ class ColDefs(object):
         ----------
         attrib : str
             Can be one or more of the attributes listed in
-            `KEYWORD_ATTRIBUTES`.  The default is ``"all"`` which will print
-            out all attributes.  It forgives plurals and blanks.  If
-            there are two or more attribute names, they must be
+            ``pyfits.column.KEYWORD_ATTRIBUTES``.  The default is ``"all"``
+            which will print out all attributes.  It forgives plurals and
+            blanks.  If there are two or more attribute names, they must be
             separated by comma(s).
 
         output : file, optional
             File-like object to output to.  Outputs to stdout by default.
-            If False, returns the attributes as a dict instead.
+            If `False`, returns the attributes as a `dict` instead.
 
         Notes
         -----
@@ -1307,7 +1316,8 @@ class _VLF(np.ndarray):
                 # equally, beautiful!
                 input = [chararray.array(x, itemsize=1) for x in input]
             except:
-                raise ValueError('Inconsistent input data array: %s' % input)
+                raise ValueError(
+                    'Inconsistent input data array: {0}'.format(input))
 
         a = np.array(input, dtype=np.object)
         self = np.ndarray.__new__(cls, shape=(len(input),), buffer=a,
@@ -1365,7 +1375,7 @@ def _get_index(names, key):
 
     if _is_int(key):
         indx = int(key)
-    elif isinstance(key, basestring):
+    elif isinstance(key, string_types):
         # try to find exact match first
         try:
             indx = names.index(key.rstrip())

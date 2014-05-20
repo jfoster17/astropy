@@ -4,6 +4,10 @@ Executable Scripts
 Astropy installs a couple of useful utility programs on your system that are
 built with Astropy.
 
+fitsheader
+^^^^^^^^^^
+.. automodule:: astropy.io.fits.scripts.fitsheader
+
 fitscheck
 ^^^^^^^^^
 .. automodule:: astropy.io.fits.scripts.fitscheck
@@ -16,7 +20,7 @@ fitsdiff
 
 .. currentmodule:: astropy.io.fits
 
-fitsdiff provides a thin command-line wrapper around the :class:`FITSDiff`
+``fitsdiff`` provides a thin command-line wrapper around the :class:`FITSDiff`
 interface--it outputs the report from a :class:`FITSDiff` of two FITS files,
 and like common diff-like commands returns a 0 status code if no differences
 were found, and 1 if differences were found:

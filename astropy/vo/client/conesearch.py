@@ -1,7 +1,8 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """Support VO Simple Cone Search capabilities."""
-from __future__ import print_function, division
+from __future__ import absolute_import, division, print_function, unicode_literals
 
+# STDLIB
 import warnings
 
 # THIRD-PARTY
@@ -10,14 +11,14 @@ import numpy as np
 # LOCAL
 from . import vos_catalog
 from .async import AsyncBase
+from .exceptions import ConeSearchError, VOSError
 from ... import units as u
-from ...config.configuration import ConfigurationItem
-from ...coordinates import Angle, ICRS, SphericalCoordinatesBase
-from ...logger import log
-from ...utils.data import REMOTE_TIMEOUT
+from ...config.configuration import ConfigAlias
+from ...coordinates import ICRS, BaseCoordinateFrame, Longitude, Latitude, SkyCoord
+from ...units import Quantity
 from ...utils.timer import timefunc, RunTimePredictor
 from ...utils.exceptions import AstropyUserWarning
-
+from ...utils import data
 
 __all__ = ['AsyncConeSearch', 'conesearch', 'AsyncSearchAll', 'search_all',
            'list_catalogs', 'predict_search', 'conesearch_timer']
@@ -27,12 +28,9 @@ __all__ = ['AsyncConeSearch', 'conesearch', 'AsyncSearchAll', 'search_all',
 # doctests
 __doctest_skip__ = ['AsyncConeSearch', 'AsyncSearchAll']
 
-CONESEARCH_DBNAME = ConfigurationItem('conesearch_dbname', 'conesearch_good',
-                                      'Conesearch database name.')
-
-
-class ConeSearchError(Exception):  # pragma: no cover
-    pass
+CONESEARCH_DBNAME = ConfigAlias(
+    '0.4', 'CONESEARCH_DBNAME', 'conesearch_dbname',
+    'astropy.vo.client.conesearch', 'astropy.vo')
 
 
 class AsyncConeSearch(AsyncBase):
@@ -51,7 +49,7 @@ class AsyncConeSearch(AsyncBase):
     --------
     >>> from astropy import coordinates as coord
     >>> from astropy import units as u
-    >>> c = coord.ICRS(6.0223, -72.0814, unit=(u.degree, u.degree))
+    >>> c = coord.ICRS(6.0223 * u.degree, -72.0814 * u.degree)
     >>> async_search = conesearch.AsyncConeSearch(
     ...     c, 0.5 * u.degree,
     ...     catalog_db='The PMM USNO-A1.0 Catalogue (Monet 1997) 1')
@@ -64,9 +62,9 @@ class AsyncConeSearch(AsyncBase):
     False
 
     Get search results after a 30-second wait (not to be
-    confused with ``astropy.utils.data.REMOTE_TIMEOUT`` that
+    confused with `astropy.utils.data.Conf.remote_timeout` that
     governs individual Cone Search queries). If search is still not
-    done after 30 seconds, ``TimeoutError`` is raised. Otherwise,
+    done after 30 seconds, `~.exceptions.TimeoutError` is raised. Otherwise,
     Cone Search result is returned and can be manipulated as in
     :ref:`Simple Cone Search Examples <vo-sec-scs-examples>`.
     If no ``timeout`` keyword given, it waits until completion:
@@ -78,7 +76,7 @@ class AsyncConeSearch(AsyncBase):
 
     """
     def __init__(self, *args, **kwargs):
-        AsyncBase.__init__(self, conesearch, *args, **kwargs)
+        super(AsyncConeSearch, self).__init__(conesearch, *args, **kwargs)
 
 
 def conesearch(center, radius, verb=1, **kwargs):
@@ -87,23 +85,18 @@ def conesearch(center, radius, verb=1, **kwargs):
 
     Parameters
     ----------
-    center : tuple of float or :ref:`astropy-coordinates`
-        Right-ascension and declination for the position of
-        the center of the cone to search:
+    center : `~astropy.coordinates.SkyCoord`, `~astropy.coordinates.BaseCoordinateFrame`, or sequence of length 2
+        Position of the center of the cone to search.  It may be specified as an
+        object from the :ref:`astropy-coordinates` package, or as a length 2
+        sequence.  If a sequence, it is assumed to be ``(RA, DEC)`` in the
+        ICRS coordinate frame, given in decimal degrees.
 
-            - If tuple of float is given, it is assumed to be
-              ``(RA, DEC)`` in the ICRS coordinate system,
-              given in decimal degrees.
-            - If astropy coordinates object is given, it will
-              be converted internally to
-              `~astropy.coordinates.builtin_systems.ICRS`.
-
-    radius : float or `~astropy.coordinates.angles.Angle` object
+    radius : float or `~astropy.units.quantity.Quantity`
         Radius of the cone to search:
 
             - If float is given, it is assumed to be in decimal degrees.
-            - If astropy angle object or angular quantity is given,
-              it is internally converted to degrees.
+            - If astropy quantity is given, it is internally converted
+              to degrees.
 
     verb : {1, 2, 3}
         Verbosity indicating how many columns are to be returned
@@ -129,22 +122,23 @@ def conesearch(center, radius, verb=1, **kwargs):
         use to most control:
 
             - `None`: A database of
-              ``astropy.vo.client.conesearch.CONESEARCH_DBNAME``
-              catalogs is downloaded from
-              ``astropy.vo.client.vos_catalog.BASEURL``.  The first
-              catalog in the database to successfully return a result is used.
+              `astropy.vo.Conf.conesearch_dbname` catalogs is
+              downloaded from `astropy.vo.Conf.vos_baseurl`.  The
+              first catalog in the database to successfully return a
+              result is used.
 
             - *catalog name*: A name in the database of
-              ``astropy.vo.client.conesearch.CONESEARCH_DBNAME``
-              catalogs at ``astropy.vo.client.vos_catalog.BASEURL`` is used.
-              For a list of acceptable names, use :func:`list_catalogs`.
+              `astropy.vo.Conf.conesearch_dbname` catalogs at
+              `astropy.vo.Conf.vos_baseurl` is used.  For a list of
+              acceptable names, use :func:`list_catalogs`.
 
             - *url*: The prefix of a URL to a IVOA Service for
-              ``astropy.vo.client.conesearch.CONESEARCH_DBNAME``.
-              Must end in either '?' or '&'.
+              `astropy.vo.Conf.conesearch_dbname`.  Must
+              end in either '?' or '&'.
 
-            - `VOSCatalog` object: A specific catalog manually downloaded and
-              selected from the database (see :ref:`vo-sec-client-vos`).
+            - `~astropy.vo.client.vos_catalog.VOSCatalog` object: A specific
+              catalog manually downloaded and selected from the database
+              (see :ref:`vo-sec-client-vos`).
 
             - Any of the above 3 options combined in a list, in which case
               they are tried in order.
@@ -152,9 +146,9 @@ def conesearch(center, radius, verb=1, **kwargs):
     pedantic : bool or `None`
         When `True`, raise an error when the file violates the spec,
         otherwise issue a warning.  Warnings may be controlled using
-        :py:mod:`warnings` module.
-        When not provided, uses the configuration setting
-        ``astropy.io.votable.table.PEDANTIC``, which defaults to `False`.
+        :py:mod:`warnings` module.  When not provided, uses the
+        configuration setting `astropy.io.votable.Conf.pedantic`,
+        which defaults to `False`.
 
     verbose : bool
         Verbose output.
@@ -166,7 +160,7 @@ def conesearch(center, radius, verb=1, **kwargs):
 
     Returns
     -------
-    obj : `astropy.io.votable.tree.Table` object
+    obj : `astropy.io.votable.tree.Table`
         First table from first successful VO service request.
 
     Raises
@@ -178,6 +172,8 @@ def conesearch(center, radius, verb=1, **kwargs):
         If VO service request fails.
 
     """
+    from .. import conf
+
     # Validate RA and DEC
     ra, dec = _validate_coord(center)
 
@@ -191,7 +187,7 @@ def conesearch(center, radius, verb=1, **kwargs):
 
     args = {'RA': ra, 'DEC': dec, 'SR': sr, 'VERB': verb}
 
-    return vos_catalog.call_vo_service(CONESEARCH_DBNAME(),
+    return vos_catalog.call_vo_service(conf.conesearch_dbname,
                                        kwargs=args, **kwargs)
 
 
@@ -211,7 +207,7 @@ class AsyncSearchAll(AsyncBase):
     --------
     >>> from astropy import coordinates as coord
     >>> from astropy import units as u
-    >>> c = coord.ICRS(6.0223, -72.0814, unit=(u.degree, u.degree))
+    >>> c = coord.ICRS(6.0223 * u.degree, -72.0814 * u.degree)
     >>> async_searchall = conesearch.AsyncSearchAll(c, 0.5 * u.degree)
 
     Check search status:
@@ -221,16 +217,16 @@ class AsyncSearchAll(AsyncBase):
     >>> async_search.done()
     False
 
-    Get a dictionary of all search results after a 30-second wait
-    (not to be confused with ``astropy.utils.data.REMOTE_TIMEOUT`` that
+    Get a dictionary of all search results after a 30-second wait (not
+    to be confused with `astropy.utils.data.Conf.remote_timeout` that
     governs individual Cone Search queries). If search is still not
-    done after 30 seconds, ``TimeoutError`` is raised. Otherwise,
-    a dictionary is returned and can be manipulated as in
-    :ref:`Simple Cone Search Examples <vo-sec-scs-examples>`.
-    If no ``timeout`` keyword given, it waits until completion:
+    done after 30 seconds, `~.exceptions.TimeoutError` is raised. Otherwise, a
+    dictionary is returned and can be manipulated as in :ref:`Simple
+    Cone Search Examples <vo-sec-scs-examples>`.  If no ``timeout``
+    keyword given, it waits until completion:
 
     >>> async_allresults = async_search.get(timeout=30)
-    >>> all_catalogs = async_allresults.keys()
+    >>> all_catalogs = list(async_allresults)
     >>> first_cone_arr = async_allresults[all_catalogs[0]].array.data
     >>> first_cone_arr.size
     36184
@@ -251,7 +247,7 @@ def search_all(*args, **kwargs):
 
     Parameters
     ----------
-    args, kwargs
+    args, kwargs :
         Arguments and keywords accepted by :func:`conesearch`.
 
     Returns
@@ -267,6 +263,8 @@ def search_all(*args, **kwargs):
         When invalid inputs are passed into Cone Search.
 
     """
+    from .. import conf
+
     all_results = {}
 
     catalog_db = kwargs.get('catalog_db', None)
@@ -276,13 +274,13 @@ def search_all(*args, **kwargs):
     cache = kwargs.get('cache', True)
     verbose = kwargs.get('verbose', True)
 
-    catalogs = vos_catalog._get_catalogs(CONESEARCH_DBNAME(), catalog_db,
+    catalogs = vos_catalog._get_catalogs(conf.conesearch_dbname, catalog_db,
                                          cache=cache, verbose=verbose)
 
     for name, catalog in catalogs:
         try:
             result = conesearch(catalog_db=catalog, *args, **kwargs)
-        except vos_catalog.VOSError:
+        except VOSError:
             pass
         else:
             all_results[result.url] = result
@@ -321,7 +319,9 @@ def list_catalogs(**kwargs):
         List of catalog names.
 
     """
-    return vos_catalog.list_catalogs(CONESEARCH_DBNAME(), **kwargs)
+    from .. import conf
+
+    return vos_catalog.list_catalogs(conf.conesearch_dbname, **kwargs)
 
 
 def predict_search(url, *args, **kwargs):
@@ -342,7 +342,8 @@ def predict_search(url, *args, **kwargs):
 
         #. Fitted slope is negative.
         #. Any of the estimated results is negative.
-        #. Estimated run time exceeds ``astropy.utils.data.REMOTE_TIMEOUT``.
+        #. Estimated run time exceeds
+           `astropy.utils.data.Conf.remote_timeout`.
 
     .. note::
 
@@ -350,7 +351,7 @@ def predict_search(url, *args, **kwargs):
         But unlike :func:`conesearch_timer`, timer info is suppressed.
 
         If ``plot=True``, plot will be displayed.
-        Plotting uses :mod:`matplotlib`.
+        Plotting uses `matplotlib <http://matplotlib.sourceforge.net/>`_.
 
         The predicted results are just *rough* estimates.
 
@@ -418,9 +419,9 @@ def predict_search(url, *args, **kwargs):
     if t_est < 0 or t_coeffs[1] < 0:  # pragma: no cover
         warnings.warn('Estimated runtime ({0} s) is non-physical with slope of '
                       '{1}'.format(t_est, t_coeffs[1]), AstropyUserWarning)
-    elif t_est > REMOTE_TIMEOUT():  # pragma: no cover
+    elif t_est > data.conf.remote_timeout:  # pragma: no cover
         warnings.warn('Estimated runtime is longer than timeout of '
-                      '{0} s'.format(REMOTE_TIMEOUT()), AstropyUserWarning)
+                      '{0} s'.format(data.conf.remote_timeout), AstropyUserWarning)
 
     # Predict number of objects
     sr_arr = sorted(cs_pred.results)  # Orig with floating point error
@@ -468,7 +469,7 @@ def conesearch_timer(*args, **kwargs):
     t : float
         Run time in seconds.
 
-    obj : `astropy.io.votable.tree.Table` object
+    obj : `astropy.io.votable.tree.Table`
         First table from first successful VO service request.
 
     """
@@ -476,7 +477,8 @@ def conesearch_timer(*args, **kwargs):
 
 
 def _local_conversion(func, x):
-    """Try ``func(x)`` and replace ``ValueError`` with ``ConeSearchError``."""
+    """Try ``func(x)`` and replace `~.exceptions.ValueError` with
+    ``ConeSearchError``."""
     try:
         y = func(x)
     except ValueError as e:  # pragma: no cover
@@ -486,20 +488,23 @@ def _local_conversion(func, x):
 
 
 def _validate_coord(center):
-    if isinstance(center, SphericalCoordinatesBase):
+    """Validate coordinates."""
+    if isinstance(center, SkyCoord):
+        icrscoord = center.transform_to(ICRS).frame
+    elif isinstance(center, BaseCoordinateFrame):
         icrscoord = center.transform_to(ICRS)
     else:
-        icrscoord = ICRS(*center, unit=(u.degree, u.degree))
+        icrscoord = ICRS(Longitude(center[0], unit=u.degree),
+                         Latitude(center[1], unit=u.degree))
 
     return icrscoord.ra.degree, icrscoord.dec.degree
 
 
 def _validate_sr(radius):
     """Validate search radius."""
-        # Validate search radius
-    if isinstance(radius, Angle):
-        sr_angle = radius
+    if isinstance(radius, Quantity):
+        sr_angle = radius.to(u.degree)
     else:
-        sr_angle = Angle(radius, unit=u.degree)
+        sr_angle = radius * u.degree
 
-    return sr_angle.degree
+    return sr_angle.value

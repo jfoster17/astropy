@@ -1,3 +1,11 @@
+# -*- coding: utf-8 -*-
+
+# TEST_UNICODE_LITERALS
+"""
+Tests the Angle string formatting capabilities.  SkyCoord formatting is in
+test_sky_coord
+"""
+
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 
@@ -6,6 +14,7 @@ from ...tests.helper import pytest
 
 from ..angles import Angle
 from ... import units as u
+
 
 def test_to_string_precision():
     # There are already some tests in test_api.py, but this is a regression
@@ -53,11 +62,11 @@ def test_to_string_decimal():
 def test_to_string_formats():
     a = Angle(1.113355, unit=u.deg)
     assert a.to_string(format='latex') == r'$1^\circ06{}^\prime48.078{}^{\prime\prime}$'
-    assert a.to_string(format='unicode') == '1\xb006\u203248.078\u2033'
+    assert a.to_string(format='unicode') == '1°06′48.078″'
 
     a = Angle(1.113355, unit=u.hour)
     assert a.to_string(format='latex') == r'$1^\mathrm{h}06^\mathrm{m}48.078^\mathrm{s}$'
-    assert a.to_string(format='unicode') == '1\u02b006\u1d5048.078\u02e2'
+    assert a.to_string(format='unicode') == '1ʰ06ᵐ48.078ˢ'
 
     a = Angle(1.113355, unit=u.radian)
     assert a.to_string(format='latex') == r'$1.11336\mathrm{rad}$'
@@ -69,6 +78,15 @@ def test_to_string_fields():
     assert a.to_string(fields=1) == r'1d'
     assert a.to_string(fields=2) == r'1d07m'
     assert a.to_string(fields=3) == r'1d06m48.078s'
+
+
+def test_to_string_padding():
+    a = Angle(0.5653, unit=u.deg)
+    assert a.to_string(unit='deg', sep=':', pad=True) == r'00:33:55.08'
+
+    # Test to make sure negative angles are padded correctly
+    a = Angle(-0.5653, unit=u.deg)
+    assert a.to_string(unit='deg', sep=':', pad=True) == r'-00:33:55.08'
 
 
 def test_sexagesimal_rounding_up():
@@ -93,42 +111,6 @@ def test_to_string_scalar():
     assert isinstance(a.to_string(), six.text_type)
 
 
-import numpy as np
-from .. import ICRS, FK4, FK4NoETerms, FK5, Galactic, AltAz
-
-
-@pytest.mark.parametrize('frame', [ICRS, FK4, FK4NoETerms, FK5])
-def test_coordinate_to_string_vector_hms(frame):
-
-    C = frame(np.arange(2)*12.05*u.deg, np.arange(2)*13.5*u.deg)
-    assert C.to_string(precision=0) == ['-0h00m00s 0d00m00s', '0h48m12s 13d30m00s']
-    assert C.to_string(precision=1) == ['-0h00m00.0s 0d00m00.0s', '0h48m12.0s 13d30m00.0s']
-
-
-@pytest.mark.parametrize('frame', [Galactic, AltAz])
-def test_coordinate_to_string_vector_dms(frame):
-
-    C = frame(np.arange(2)*12.05*u.deg, np.arange(2)*13.5*u.deg)
-    assert C.to_string(precision=0) == ['-0d00m00s 0d00m00s', '12d03m00s 13d30m00s']
-    assert C.to_string(precision=1) == ['-0d00m00.0s 0d00m00.0s', '12d03m00.0s 13d30m00.0s']
-
-
-@pytest.mark.parametrize('frame', [ICRS, FK4, FK4NoETerms, FK5])
-def test_coordinate_to_string_scalar_hms(frame):
-
-    C = frame(12.05*u.deg, 13.5*u.deg)
-    assert C.to_string(precision=0) == '0h48m12s 13d30m00s'
-    assert C.to_string(precision=1) == '0h48m12.0s 13d30m00.0s'
-
-
-@pytest.mark.parametrize('frame', [Galactic, AltAz])
-def test_coordinate_to_string_scalar_dms(frame):
-
-    C = frame(12.05*u.deg, 13.5*u.deg)
-    assert C.to_string(precision=0) == '12d03m00s 13d30m00s'
-    assert C.to_string(precision=1) == '12d03m00.0s 13d30m00.0s'
-
-
 def test_to_string_radian_with_precision():
     """
     Regression test for a bug that caused ``to_string`` to crash for angles in
@@ -141,6 +123,14 @@ def test_to_string_radian_with_precision():
 
 
 def test_sexagesimal_round_down():
-    from .. import ICRS
-    c = ICRS(1, 2, unit=('deg', 'deg'))
-    assert c.to_string() == '0h04m00s 2d00m00s'
+    a1 = Angle(1, u.deg).to(u.hourangle)
+    a2 = Angle(2, u.deg)
+    assert a1.to_string() == '0h04m00s'
+    assert a2.to_string() == '2d00m00s'
+
+
+def test_to_string_fields_colon():
+    a = Angle(1.113355, unit=u.deg)
+    assert a.to_string(fields=2, sep=':') == '1:07'
+    assert a.to_string(fields=3, sep=':') == '1:06:48.078'
+    assert a.to_string(fields=1, sep=':') == '1'

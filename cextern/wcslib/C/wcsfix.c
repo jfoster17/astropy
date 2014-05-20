@@ -1,7 +1,7 @@
 /*============================================================================
 
-  WCSLIB 4.19 - an implementation of the FITS WCS standard.
-  Copyright (C) 1995-2013, Mark Calabretta
+  WCSLIB 4.23 - an implementation of the FITS WCS standard.
+  Copyright (C) 1995-2014, Mark Calabretta
 
   This file is part of WCSLIB.
 
@@ -22,7 +22,7 @@
 
   Author: Mark Calabretta, Australia Telescope National Facility, CSIRO.
   http://www.atnf.csiro.au/people/Mark.Calabretta
-  $Id: wcsfix.c,v 4.19 2013/09/29 14:17:51 mcalabre Exp $
+  $Id: wcsfix.c,v 4.23 2014/05/11 04:09:38 mcalabre Exp $
 *===========================================================================*/
 
 #include <math.h>
@@ -413,11 +413,10 @@ int datfix(struct wcsprm *wcs)
 int unitfix(int ctrl, struct wcsprm *wcs)
 
 {
-  int  i, k, status = FIXERR_NO_CHANGE;
+  int  i, k, result, status = FIXERR_NO_CHANGE;
   char orig_unit[80], msg[WCSERR_MSG_LENGTH];
   const char *function = "unitfix";
   struct wcserr **err;
-  int result;
 
   if (wcs == 0x0) return FIXERR_NULL_POINTER;
   err = &(wcs->err);

@@ -5,6 +5,8 @@ data/cache files used by Astropy should be placed.
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 
+from ..extern import six
+
 import os
 import sys
 
@@ -27,9 +29,9 @@ def _find_home():
 
     # this is used below to make fix up encoding issues that sometimes crop up
     # in py2.x but not in py3.x
-    if sys.version_info[0] < 3:  # pragma: py3
+    if six.PY2:
         decodepath = lambda pth: pth.decode(sys.getfilesystemencoding())
-    else:  # pragma: py2
+    elif six.PY3:
         decodepath = lambda pth: pth
 
     # First find the home directory - this is inspired by the scheme ipython
@@ -42,8 +44,12 @@ def _find_home():
             raise OSError('Could not find unix home directory to search for '
                           'astropy config dir')
     elif os.name == 'nt':  # This is for all modern Windows (NT or after)
-        # Try for a network home first
-        if 'HOMESHARE' in os.environ:
+        if 'MSYSTEM' in os.environ and os.environ.get('HOME'):
+            # Likely using an msys shell; use whatever it is using for its
+            # $HOME directory
+            homedir = decodepath(os.environ['HOME'])
+        # Next try for a network home
+        elif 'HOMESHARE' in os.environ:
             homedir = decodepath(os.environ['HOMESHARE'])
         # See if there's a local home
         elif 'HOMEDRIVE' in os.environ and 'HOMEPATH' in os.environ:

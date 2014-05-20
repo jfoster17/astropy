@@ -1,13 +1,13 @@
 .. _astropy-modeling:
 
 ***************************************
-Models And Fitting (`astropy.modeling`)
+Models and Fitting (`astropy.modeling`)
 ***************************************
 
 Introduction
 ============
 
-`~astropy.modeling` provides a framework for representing models and
+`astropy.modeling` provides a framework for representing models and
 performing model evaluation and fitting. It supports 1D and 2D models
 and fitting with parameter constraints.
 
@@ -17,13 +17,13 @@ sometimes necessary) and new fitting algorithms may be added without changing
 the existing models.  In addition models can be combined in different ways
 using a machinery that allows assigning outputs from one model into the
 appropriate input of another in a flexible way,
-`~astropy.modeling.core.LabeledInput`.  The goal is to eventually provide a
+`~astropy.modeling.LabeledInput`.  The goal is to eventually provide a
 rich toolset of models and fitters such that most users will not need to define
 new model classes, nor special purpose fitting routines (but not making that
 hard to do if it is necessary).
 
 .. warning::
-    `~astropy.modeling` is currently a work-in-progress, and thus it is
+    `astropy.modeling` is currently a work-in-progress, and thus it is
     likely there will be significant API changes in later versions of
     Astropy. If you have specific ideas for how it might be improved,
     feel free to let us know on the `astropy-dev mailing list`_ or at
@@ -50,20 +50,20 @@ The `astropy.modeling` package defines a number of models that live inside
     >>> g = models.Gaussian1D(amplitude=1.2, mean=0.9, stddev=0.5)
     >>> print(g)
     Model: Gaussian1D
-    n_inputs:   1
-    Degree: N/A
+    Inputs: 1
+    Outputs: 1
     Parameter sets: 1
     Parameters:
-               amplitude: Parameter('amplitude', value=1.2)
-               mean: Parameter('mean', value=0.9000...)
-               stddev: Parameter('stddev', value=0.5)
+        amplitude mean stddev
+        --------- ---- ------
+              1.2  0.9    0.5
 
 Model parameters can be accessed as attributes:
 
     >>> g.amplitude
     Parameter('amplitude', value=1.2)
     >>> g.mean
-    Parameter('mean', value=0.9000...)
+    Parameter('mean', value=0.9)
     >>> g.stddev
     Parameter('stddev', value=0.5)
 
@@ -71,7 +71,7 @@ and can also be set using the attributes::
 
     >>> g.amplitude = 0.8
     >>> g.amplitude
-    Parameter('amplitude', value=0.8000...)
+    Parameter('amplitude', value=0.8)
 
 Models can be evaluated by calling them as functions::
 
@@ -88,10 +88,9 @@ Simple 1D model fitting
 -----------------------
 
 In this section, we look at a simple example of fitting a Gaussian to a
-simulated dataset. We use the :class:`~astropy.modeling.functional_models.Gaussian1D`
-and :class:`~astropy.modeling.functional_models.Trapezoid1D` models and the
-:class:`~astropy.modeling.fitting.NonLinearLSQFitter` fitter to
-fit the data:
+simulated dataset. We use the `~astropy.modeling.models.Gaussian1D`
+and `~astropy.modeling.models.Trapezoid1D` models and the
+`~astropy.modeling.fitting.NonLinearLSQFitter` fitter to fit the data:
 
 .. plot::
    :include-source:
@@ -131,7 +130,8 @@ that takes the initial model (``t_init`` or ``g_init``) and the data values
 Simple 2D model fitting
 -----------------------
 
-Similarly to the 1-d example, we can create a simulated 2-d data dataset, and fit a polynomial model to it. This could be used for example to fit the background in an image.
+Similarly to the 1-d example, we can create a simulated 2-d data dataset, and fit a polynomial model to it.
+This could be used for example to fit the background in an image.
 
 .. plot::
    :include-source:
@@ -141,7 +141,7 @@ Similarly to the 1-d example, we can create a simulated 2-d data dataset, and fi
 
     # Generate fake data
     np.random.seed(0)
-    x, y = np.mgrid[:128, :128]
+    y, x = np.mgrid[:128, :128]
     z = 2. * x ** 2 - 0.5 * x ** 2 + 1.5 * x * y - 1.
     z += np.random.normal(0., 0.1, z.shape) * 50000.
 

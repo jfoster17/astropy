@@ -5,7 +5,7 @@ import os
 from distutils.core import Extension
 from glob import glob
 
-from astropy import setup_helpers
+from astropy_helpers import setup_helpers
 
 
 def get_extensions():
@@ -30,7 +30,9 @@ def get_extensions():
             cfg['extra_compile_args'].extend([
                 '-Wno-unused-variable', '-Wno-parentheses',
                 '-Wno-uninitialized', '-Wno-format', '-Wno-strict-prototypes',
-                '-Wno-unused', '-Wno-comments', '-Wno-switch'])
+                '-Wno-unused', '-Wno-comments', '-Wno-switch',
+                '-Wno-declaration-after-statement'
+            ])
 
         cfitsio_path = os.path.join('cextern', 'cfitsio')
         cfitsio_files = glob(os.path.join(cfitsio_path, '*.c'))
@@ -50,3 +52,7 @@ def get_package_data():
 
 def get_external_libraries():
     return ['cfitsio']
+
+
+def requires_2to3():
+    return False

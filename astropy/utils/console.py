@@ -12,6 +12,7 @@ import re
 import math
 import multiprocessing
 import os
+import struct
 import sys
 import threading
 import time
@@ -33,12 +34,19 @@ except NameError:
 else:
     try:
         from IPython.zmq.iostream import OutStream
+    except ImportError:
+        try:
+            from IPython.kernel.zmq.iostream import OutStream
+        except ImportError:
+            OutStream = None
+
+    if OutStream is not None:
         from IPython.utils import io
         # On Windows in particular this is necessary, as the io.stdout stream
         # in IPython gets hooked up to some pyreadline magic to handle colors
         stdio = io
         IPythonIOStream = io.IOStream
-    except ImportError:
+    else:
         OutStream = None
         IPythonIOStream = None
         stdio = sys
@@ -50,26 +58,23 @@ try:
 except ImportError:
     _HAVE_IPYTHON = False
 
-from ..config import ConfigurationItem
+from ..config import ConfigAlias
 from ..extern import six
 from ..extern.six.moves import range
+from .. import conf
 
 from .misc import deprecated, isiterable
 
 
 __all__ = [
     'isatty', 'color_print', 'human_time', 'human_file_size',
-    'ProgressBar', 'Spinner', 'print_code_line', 'ProgressBarOrSpinner']
+    'ProgressBar', 'Spinner', 'print_code_line', 'ProgressBarOrSpinner',
+    'terminal_size']
 
 
 # Only use color by default on Windows if IPython is installed.
-USE_COLOR = ConfigurationItem(
-    'use_color', sys.platform != 'win32' or _HAVE_IPYTHON,
-    'When True, use ANSI color escape sequences when writing to the console.')
-from ..import UNICODE_OUTPUT
-
-
-IS_PY3 = sys.version_info[0] == 3
+USE_COLOR = ConfigAlias(
+    '0.4', 'USE_COLOR', 'use_color', 'astropy.utils.console', 'astropy')
 
 
 _DEFAULT_ENCODING = 'utf-8'
@@ -88,12 +93,41 @@ def isatty(file):
         return False
 
     if (OutStream is not None and
-        isinstance(file, OutStream) and
+        isinstance(file, (OutStream, IPythonIOStream)) and
         file.name == 'stdout'):
         return True
     elif hasattr(file, 'isatty'):
         return file.isatty()
     return False
+
+
+def terminal_size(file=stdio.stdout):
+    """
+    Returns a tuple (height, width) containing the height and width of
+    the terminal.
+
+    This function will look for the width in height in multiple areas
+    before falling back on the width and height in astropy's
+    configuration.
+    """
+
+    try:
+        s = struct.pack("HHHH", 0, 0, 0, 0)
+        x = fcntl.ioctl(file, termios.TIOCGWINSZ, s)
+        (lines, width, xpixels, ypixels) = struct.unpack("HHHH", x)
+        if lines > 12:
+            lines -= 6
+        if width > 10:
+            width -= 1
+        return (lines, width)
+    except:
+        try:
+            # see if POSIX standard variables will work
+            return (int(os.environ.get('LINES')),
+                    int(os.environ.get('COLUMNS')))
+        except TypeError:
+            # fall back on configuration variables
+            return conf.max_lines, conf.max_width
 
 
 def _color_text(text, color):
@@ -235,13 +269,12 @@ def color_print(*args, **kwargs):
         The ending of the message.  Defaults to ``\\n``.  The end will
         be printed after resetting any color or font state.
     """
-
     file = kwargs.get('file', stdio.stdout)
 
     end = kwargs.get('end', '\n')
 
     write = file.write
-    if isatty(file) and USE_COLOR():
+    if isatty(file) and conf.use_color:
         for i in range(0, len(args), 2):
             msg = args[i]
             if i + 1 == len(args):
@@ -255,7 +288,7 @@ def color_print(*args, **kwargs):
             # Some file objects support writing unicode sensibly on some Python
             # versions; if this fails try creating a writer using the locale's
             # preferred encoding. If that fails too give up.
-            if not IS_PY3 and isinstance(msg, bytes):
+            if not six.PY3 and isinstance(msg, bytes):
                 msg = _decode_preferred_encoding(msg)
 
             write = _write_with_fallback(msg, write, file)
@@ -264,7 +297,7 @@ def color_print(*args, **kwargs):
     else:
         for i in range(0, len(args), 2):
             msg = args[i]
-            if not IS_PY3 and isinstance(msg, bytes):
+            if not six.PY3 and isinstance(msg, bytes):
                 # Support decoding bytes to unicode on Python 2; use the
                 # preferred encoding for the locale (which is *sometimes*
                 # sensible)
@@ -318,12 +351,12 @@ def human_time(seconds):
     seconds = int(seconds)
 
     if seconds < 60:
-        return '   {0:02d}s'.format(seconds)
-    for i in xrange(len(units) - 1):
+        return '   {0:2d}s'.format(seconds)
+    for i in range(len(units) - 1):
         unit1, limit1 = units[i]
         unit2, limit2 = units[i + 1]
         if seconds >= limit1:
-            return '{0:02d}{1}{2:02d}{3}'.format(
+            return '{0:2d}{1}{2:2d}{3}'.format(
                 seconds // limit1, unit1,
                 (seconds % limit1) // limit2, unit2)
     return '  ~inf'
@@ -374,7 +407,7 @@ class ProgressBar(six.Iterator):
     """
     A class to display a progress bar in the terminal.
 
-    It is designed to be used either with the `with` statement::
+    It is designed to be used either with the ``with`` statement::
 
         with ProgressBar(len(items)) as bar:
             for item in enumerate(items):
@@ -396,8 +429,9 @@ class ProgressBar(six.Iterator):
         file : writable file-like object, optional
             The file to write the progress bar to.  Defaults to
             `sys.stdout`.  If `file` is not a tty (as determined by
-            calling its `isatty` member, if any), the scrollbar will
-            be completely silent.
+            calling its `isatty` member, if any, or special case hacks
+            to detect the IPython console), the progress bar will be
+            completely silent.
         """
         if file is None:
             file = stdio.stdout
@@ -423,7 +457,7 @@ class ProgressBar(six.Iterator):
         self._start_time = time.time()
 
         self._should_handle_resize = (
-            _CAN_RESIZE_TERMINAL and isatty(self._file))
+            _CAN_RESIZE_TERMINAL and self._file.isatty())
         self._handle_resize()
         if self._should_handle_resize:
             signal.signal(signal.SIGWINCH, self._handle_resize)
@@ -435,18 +469,7 @@ class ProgressBar(six.Iterator):
         self.update(0)
 
     def _handle_resize(self, signum=None, frame=None):
-        if self._should_handle_resize:
-            # Don't import numpy at module level since it may not be
-            # available in all contexts that this module is imported
-            import numpy as np
-            data = fcntl.ioctl(self._file, termios.TIOCGWINSZ, '\0' * 8)
-            arr = np.fromstring(data, dtype=np.int16)
-            terminal_width = arr[1]
-        else:
-            try:
-                terminal_width = int(os.environ.get('COLUMNS'))
-            except (TypeError, ValueError):
-                terminal_width = 78
+        terminal_width = terminal_size(self._file)[1]
         self._bar_length = terminal_width - 37
 
     def __enter__(self):
@@ -603,7 +626,7 @@ class ProgressBar(six.Iterator):
         Returns
         -------
         generator :
-            A generator over `items`
+            A generator over ``items``.
         """
         if file is None:
             file = stdio.stdout
@@ -614,7 +637,7 @@ class Spinner(object):
     """
     A class to display a spinner in the terminal.
 
-    It is designed to be used with the `with` statement::
+    It is designed to be used with the ``with`` statement::
 
         with Spinner("Reticulating splines", "green") as s:
             for item in enumerate(items):
@@ -640,8 +663,9 @@ class Spinner(object):
         file : writeable file-like object, optional
             The file to write the spinner to.  Defaults to
             `sys.stdout`.  If `file` is not a tty (as determined by
-            calling its `isatty` member, if any), the scrollbar will
-            be completely silent.
+            calling its `isatty` member, if any, or special case hacks
+            to detect the IPython console), the spinner will be
+            completely silent.
 
         step : int, optional
             Only update the spinner every *step* steps
@@ -657,7 +681,7 @@ class Spinner(object):
         self._file = file
         self._step = step
         if chars is None:
-            if UNICODE_OUTPUT():
+            if conf.unicode_output:
                 chars = self._default_unicode_chars
             else:
                 chars = self._default_ascii_chars
@@ -730,7 +754,7 @@ class ProgressBarOrSpinner(object):
     depending on whether the total size of the operation is
     known or not.
 
-    It is designed to be used with the `with` statement::
+    It is designed to be used with the ``with`` statement::
 
         if file.has_length():
             length = file.get_length()
@@ -757,7 +781,7 @@ class ProgressBarOrSpinner(object):
             alongside the `Spinner`.
 
         color : str, optional
-            The color of `msg`, if any.  Must be an ANSI terminal
+            The color of ``msg``, if any.  Must be an ANSI terminal
             color name.  Must be one of: black, red, green, brown,
             blue, magenta, cyan, lightgrey, default, darkgrey,
             lightred, lightgreen, yellow, lightblue, lightmagenta,
@@ -766,7 +790,7 @@ class ProgressBarOrSpinner(object):
         file : writable file-like object, optional
             The file to write the to.  Defaults to `sys.stdout`.  If
             `file` is not a tty (as determined by calling its `isatty`
-            member, if any), only `msg` will be displayed: the
+            member, if any), only ``msg`` will be displayed: the
             `ProgressBar` or `Spinner` will be silent.
         """
 
@@ -805,7 +829,7 @@ def print_code_line(line, col=None, file=None, tabwidth=8, width=70):
     position in the line.  Useful for displaying the context of error
     messages.
 
-    If the line is more than `width` characters, the line is truncated
+    If the line is more than ``width`` characters, the line is truncated
     accordingly and '…' characters are inserted at the front and/or
     end.
 
@@ -820,8 +844,8 @@ def print_code_line(line, col=None, file=None, tabwidth=8, width=70):
         The line of code to display
 
     col : int, optional
-        The character in the line to highlight.  `col` must be less
-        than `len(line)`.
+        The character in the line to highlight.  ``col`` must be less
+        than ``len(line)``.
 
     file : writeable file-like object, optional
         Where to write to.  Defaults to `sys.stdout`.
@@ -840,6 +864,11 @@ def print_code_line(line, col=None, file=None, tabwidth=8, width=70):
     if file is None:
         file = stdio.stdout
 
+    if conf.unicode_output:
+        ellipsis = '…'
+    else:
+        ellipsis = '...'
+
     write = file.write
 
     if col is not None:
@@ -853,15 +882,15 @@ def print_code_line(line, col=None, file=None, tabwidth=8, width=70):
     if col is not None and col > width:
         new_col = min(width // 2, len(line) - col)
         offset = col - new_col
-        line = line[offset + 1:]
+        line = line[offset + len(ellipsis):]
+        width -= len(ellipsis)
         new_col = col
         col -= offset
-        width = width - 3
-        color_print('…', 'darkgrey', file=file, end='')
+        color_print(ellipsis, 'darkgrey', file=file, end='')
 
     if len(line) > width:
-        write(line[:width - 1])
-        color_print('…', 'darkgrey', file=file)
+        write(line[:width - len(ellipsis)])
+        color_print(ellipsis, 'darkgrey', file=file)
     else:
         write(line)
         write('\n')

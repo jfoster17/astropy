@@ -1,4 +1,10 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
+
+# TEST_UNICODE_LITERALS
+
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
+
 from copy import copy
 
 import numpy as np
@@ -7,6 +13,8 @@ from ...tests.helper import pytest
 from ..registry import _readers, _writers, _identifiers
 from .. import registry as io_registry
 from ...table import Table
+from ...extern.six.moves import zip
+from ...extern.six import StringIO
 
 _READERS_ORIGINAL = copy(_readers)
 _WRITERS_ORIGINAL = copy(_writers)
@@ -265,7 +273,8 @@ def test_read_invalid_return():
 
 
 def test_read_basic_table():
-    data = np.array(zip([1, 2, 3], ['a', 'b', 'c']), dtype=[('A', int), ('B', '|S1')])
+    data = np.array(list(zip([1, 2, 3], ['a', 'b', 'c'])),
+                    dtype=[(str('A'), int), (str('B'), '|S1')])
     io_registry.register_reader('test', Table, lambda x: Table(x))
     t = Table.read(data, format='test')
     assert t.keys() == ['A', 'B']
@@ -274,7 +283,41 @@ def test_read_basic_table():
         assert t['B'][i] == data['B'][i]
 
 
+def test_register_readers_with_same_name_on_different_classes():
+    # No errors should be generated if the same name is registered for
+    # different objects...but this failed under python3
+    io_registry.register_reader('test', TestData, lambda: TestData())
+    io_registry.register_reader('test', Table, lambda: Table())
+    t = TestData.read(format='test')
+    assert isinstance(t, TestData)
+    tbl = Table.read(format='test')
+    assert isinstance(tbl, Table)
+
+
 def teardown_function(function):
     _readers.update(_READERS_ORIGINAL)
     _writers.update(_WRITERS_ORIGINAL)
     _identifiers.update(_IDENTIFIERS_ORIGINAL)
+
+
+class TestSubclass:
+    """
+    Test using registry with a Table sub-class
+    """
+    def test_read_table_subclass(self):
+        class MyTable(Table):
+            pass
+        data = ['a b', '1 2']
+        mt = MyTable.read(data, format='ascii')
+        t = Table.read(data, format='ascii')
+        assert np.all(mt == t)
+        assert mt.colnames == t.colnames
+        assert type(mt) is MyTable
+
+    def test_write_table_subclass(self):
+        buffer = StringIO()
+        class MyTable(Table):
+            pass
+        mt = MyTable([[1], [2]], names=['a', 'b'])
+        mt.write(buffer, format='ascii')
+        assert buffer.getvalue() == 'a b\n1 2\n'

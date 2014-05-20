@@ -1,6 +1,6 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """Inspect results from `astropy.vo.validator.validate`."""
-from __future__ import print_function, division
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 # STDLIB
 import sys
@@ -21,7 +21,7 @@ class ConeSearchResults(object):
         Cone Search database identifiers.
 
     dbs : dict
-        Stores `astropy.vo.client.vos_catalog.VOSDatabase`
+        Stores `~astropy.vo.client.vos_catalog.VOSDatabase`
         for each ``dbtypes``.
 
     catkeys : dict
@@ -54,10 +54,10 @@ class ConeSearchResults(object):
         Parameters
         ----------
         fout : output stream
-            Default is sys.stdout.
+            Default is screen output.
 
         """
-        if fout is None:
+        if fout is None:  # pragma: no cover
             fout = sys.stdout
 
         str_list = []
@@ -93,11 +93,11 @@ class ConeSearchResults(object):
 
         ignore_noncrit : bool
             Exclude warnings in
-            ``astropy.vo.validator.validate.NONCRIT_WARNINGS``.
-            This is useful to see why a catalog failed validation.
+            `astropy.vo.validator.Conf.noncritical_warnings`.  This is
+            useful to see why a catalog failed validation.
 
         """
-        if fout is None:
+        if fout is None:  # pragma: no cover
             fout = sys.stdout
 
         assert typ in self.dbtypes
@@ -144,7 +144,7 @@ class ConeSearchResults(object):
             Default is screen output.
 
         """
-        if fout is None:
+        if fout is None:  # pragma: no cover
             fout = sys.stdout
 
         str_list = []
@@ -164,7 +164,7 @@ class ConeSearchResults(object):
 def _exclude_noncrit(in_list):
     """
     Exclude any items in input list containing
-    ``astropy.vo.validator.validate.NONCRIT_WARNINGS``.
+    `astropy.vo.validator.Conf.noncritical_warnings`.
 
     Parameters
     ----------
@@ -177,12 +177,12 @@ def _exclude_noncrit(in_list):
         List with only qualified strings.
 
     """
-    from .validate import NONCRIT_WARNINGS
+    from . import conf
     out_list = []
     for s in in_list:
         n = 0
         if s is not None:
-            for w in NONCRIT_WARNINGS():
+            for w in conf.noncritical_warnings:
                 n += s.count(w)
         if n == 0:  # pragma: no cover
             out_list.append(s)

@@ -99,6 +99,13 @@ def_unit(['hp', 'horsepower'], si.W / 0.00134102209, namespace=_ns,
 
 
 ###########################################################################
+# TEMPERATURE
+
+def_unit(['deg_F', 'Fahrenheit'], namespace=_ns, doc='Degrees Fahrenheit',
+         format={'latex': r'{}^{\circ}F', 'unicode': '°F'})
+
+
+###########################################################################
 # CLEANUP
 
 del UnitBase
@@ -117,7 +124,8 @@ __doc__ += _generate_unit_summary(globals())
 def enable():
     """
     Enable Imperial units so they appear in results of
-    `Unit.find_equivalent_units` and `Unit.compose`.
+    `~astropy.units.UnitBase.find_equivalent_units` and
+    `~astropy.units.UnitBase.compose`.
 
     This may be used with the ``with`` statement to enable Imperial
     units only temporarily.

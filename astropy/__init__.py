@@ -31,7 +31,7 @@ except ImportError:
     __githash__ = ''
 
 
-__minimum_numpy_version__ = '1.5.0'
+__minimum_numpy_version__ = '1.5.1'
 
 
 # The location of the online documentation for astropy
@@ -74,13 +74,40 @@ if not _ASTROPY_SETUP_:
     _check_numpy()
 
 
-from .config import ConfigurationItem
+from . import config as _config
+import sys
 
 
-UNICODE_OUTPUT = ConfigurationItem(
-    'unicode_output', False,
-    'Use Unicode characters when outputting values, and writing widgets '
-    'to the console.')
+class Conf(_config.ConfigNamespace):
+    """
+    Configuration parameters for `astropy`.
+    """
+
+    unicode_output = _config.ConfigItem(
+        False,
+        'When True, use Unicode characters when outputting values, and '
+        'displaying widgets at the console.')
+    use_color = _config.ConfigItem(
+        sys.platform != 'win32',
+        'When True, use ANSI color escape sequences when writing to the console.',
+        aliases=['astropy.utils.console.USE_COLOR', 'astropy.logger.USE_COLOR'])
+    max_lines = _config.ConfigItem(
+        25, 'Maximum number of lines in the display if the terminal size can '
+        'not be automatically determined. Negative numbers mean no limit.',
+        aliases=['astropy.table.pprint.max_lines'])
+    max_width = _config.ConfigItem(
+        80, 'Maximum number of characters in the display if the terminal size '
+        'can not be automatically determined. Negative numbers mean no limit.',
+        aliases=['astropy.table.pprint.max_width'])
+
+conf = Conf()
+
+
+UNICODE_OUTPUT = _config.ConfigAlias(
+    '0.4', 'UNICODE_OUTPUT', 'unicode_output')
+
+
+del sys
 
 
 # set up the test command
@@ -91,8 +118,8 @@ def _get_test_runner():
 
 def test(package=None, test_path=None, args=None, plugins=None,
          verbose=False, pastebin=None, remote_data=False, pep8=False,
-         pdb=False, coverage=False, open_files=False, parallel=0,
-         docs_path=None, skip_docs=False):
+         pdb=False, open_files=False, parallel=0, docs_path=None,
+         skip_docs=False):
     """
     Run Astropy tests using py.test. A proper set of arguments is
     constructed and passed to `pytest.main`.
@@ -138,10 +165,6 @@ def test(package=None, test_path=None, args=None, plugins=None,
         Turn on PDB post-mortem analysis for failing tests. Same as
         specifying `--pdb` in `args`.
 
-    coverage : bool, optional
-        Generate a test coverage report.  The result will be placed in
-        the directory htmlcov.
-
     open_files : bool, optional
         Fail when any tests leave files open.  Off by default, because
         this adds extra run time to the test suite.  Works only on
@@ -169,8 +192,8 @@ def test(package=None, test_path=None, args=None, plugins=None,
         package=package, test_path=test_path, args=args,
         plugins=plugins, verbose=verbose, pastebin=pastebin,
         remote_data=remote_data, pep8=pep8, pdb=pdb,
-        coverage=coverage, open_files=open_files, parallel=parallel,
-        docs_path=docs_path, skip_docs=skip_docs)
+        open_files=open_files, parallel=parallel, docs_path=docs_path,
+        skip_docs=skip_docs)
 
 
 # if we are *not* in setup mode, import the logger and possibly populate the
@@ -221,7 +244,6 @@ def _initialize_astropy():
             raise
 
     # add these here so we only need to cleanup the namespace at the end
-    config_dir = None
     config_dir = os.path.dirname(__file__)
 
     try:

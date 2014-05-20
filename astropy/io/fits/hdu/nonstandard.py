@@ -9,6 +9,7 @@ from .hdulist import HDUList
 from ..header import Header, _pad_length
 from ..util import fileobj_name
 
+from ....extern.six import string_types
 from ....utils import lazyproperty
 
 
@@ -48,7 +49,7 @@ class FitsHDU(NonstandardExtHDU):
         ----------
         filename : str
             The path to the file to read into a FitsHDU
-        compress : bool (optional)
+        compress : bool, optional
             Gzip compress the FITS file
         """
 
@@ -63,7 +64,7 @@ class FitsHDU(NonstandardExtHDU):
         ----------
         hdulist : HDUList
             A valid Headerlet object.
-        compress : bool (optional)
+        compress : bool, optional
             Gzip compress the FITS file
         """
 
@@ -119,7 +120,7 @@ class FitsHDU(NonstandardExtHDU):
         if card.keyword != 'XTENSION':
             return False
         xtension = card.value
-        if isinstance(xtension, basestring):
+        if isinstance(xtension, string_types):
             xtension = xtension.rstrip()
         return xtension == cls._extension
 

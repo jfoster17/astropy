@@ -1,12 +1,19 @@
+# -*- coding: utf-8 -*-
+
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
+
+# TEST_UNICODE_LITERALS
+
 from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
+                         unicode_literals)
 
 # test helper.run_tests function
 
+from ... extern import six
+
 from .. import helper
 from ... import _get_test_runner
-
+from .. helper import pytest
 
 # run_tests should raise ValueError when asked to run on a module it can't find
 def test_module_not_found():
@@ -27,3 +34,13 @@ try:
 except SyntaxError:
     def test_run_after_2to3():
         helper.pytest.fail("Not running the 2to3'd tests!")
+
+
+# TODO: Temporarily disabled, as this seems to non-deterministically fail
+# def test_deprecation_warning():
+#     with pytest.raises(DeprecationWarning):
+#         warnings.warn('test warning', DeprecationWarning)
+
+
+def test_unicode_literal_conversion():
+    assert isinstance('ångström', six.text_type)

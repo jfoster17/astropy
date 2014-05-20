@@ -36,7 +36,8 @@ def_unit(['micron'], um, namespace=_ns,
 
 def_unit(['Angstrom', 'AA', 'angstrom'], 0.1 * nm, namespace=_ns,
          doc="ångström: 10 ** -10 m",
-         format={'latex': r'\AA', 'unicode': 'Å', 'vounit': 'angstrom'})
+         format={'latex': r'\overset{\circ}{A}', 'unicode': 'Å',
+                 'vounit': 'angstrom'})
 
 
 ###########################################################################
@@ -130,6 +131,9 @@ def_unit(['mol', 'mole'], namespace=_ns, prefixes=True,
 def_unit(
     ['K', 'Kelvin'], namespace=_ns, prefixes=True,
     doc="Kelvin: temperature with a null point at absolute zero.")
+def_unit(
+    ['deg_C', 'Celsius'], namespace=_ns, doc='Degrees Celsius',
+    format={'latex': r'{}^{\circ}C', 'unicode': '°C'})
 
 
 ###########################################################################

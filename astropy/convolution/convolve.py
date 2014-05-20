@@ -1,11 +1,15 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
+
 import warnings
 
 import numpy as np
 
-from .core import Kernel, Kernel1D, Kernel2D
+from .core import Kernel, Kernel1D, Kernel2D, MAX_NORMALIZATION
 from ..utils.exceptions import AstropyUserWarning
+from ..utils.console import human_file_size
 
 
 # Disabling all doctests in this module until a better way of handling warnings
@@ -19,9 +23,9 @@ def convolve(array, kernel, boundary='fill', fill_value=0.,
     Convolve an array with a kernel.
 
     This routine differs from `scipy.ndimage.filters.convolve` because
-    it includes a special treatment for `NaN` values. Rather than
-    including `NaNs` in the convolution calculation, which causes large
-    `NaN` holes in the convolved image, `NaN` values are replaced with
+    it includes a special treatment for ``NaN`` values. Rather than
+    including ``NaN``s in the convolution calculation, which causes large
+    ``NaN`` holes in the convolved image, ``NaN`` values are replaced with
     interpolated values using the kernel as an interpolation function.
 
     Parameters
@@ -30,7 +34,7 @@ def convolve(array, kernel, boundary='fill', fill_value=0.,
         The array to convolve. This should be a 1, 2, or 3-dimensional array
         or a list or a set of nested lists representing a 1, 2, or
         3-dimensional array.
-    kernel : `numpy.ndarray` or nddata.convolution.Kernel
+    kernel : `numpy.ndarray` or `astropy.nddata.convolution.Kernel`
         The convolution kernel. The number of dimensions should match those
         for the array, and the dimensions should be odd in all directions.
     boundary : str, optional
@@ -41,9 +45,9 @@ def convolve(array, kernel, boundary='fill', fill_value=0.,
             * 'fill'
                 Set values outside the array boundary to `fill_value`.
             * 'wrap'
-                Periodic boundary that wrap to the other side of `array`.
+                Periodic boundary that wrap to the other side of ``array``.
             * 'extend'
-                Set values outside the array to the nearest `array`
+                Set values outside the array to the nearest ``array``
                 value.
     fill_value : float, optional
         The value to use outside the array when using boundary='fill'
@@ -62,7 +66,7 @@ def convolve(array, kernel, boundary='fill', fill_value=0.,
     Notes
     -----
     Masked arrays are not supported at this time.  The convolution
-    is always done at numpy.float precision.
+    is always done at `numpy.float` precision.
     '''
     from .boundary_none import (convolve1d_boundary_none,
                                 convolve2d_boundary_none,
@@ -145,6 +149,11 @@ def convolve(array, kernel, boundary='fill', fill_value=0.,
     # explicitly normalize the kernel here, and then scale the image at the
     # end if normalization was not requested.
     kernel_sum = kernel_internal.sum()
+
+    if kernel_sum < 1. / MAX_NORMALIZATION and normalize_kernel:
+        raise Exception("The kernel can't be normalized, because its sum is "
+                        "close to zero. The sum of the given kernel is < {0}"
+                        .format(1. / MAX_NORMALIZATION))
     kernel_internal /= kernel_sum
 
     if array_internal.ndim == 0:
@@ -214,16 +223,17 @@ def convolve(array, kernel, boundary='fill', fill_value=0.,
 def convolve_fft(array, kernel, boundary='fill', fill_value=0, crop=True,
                  return_fft=False, fft_pad=True, psf_pad=False,
                  interpolate_nan=False, quiet=False, ignore_edge_zeros=False,
-                 min_wt=0.0, normalize_kernel=False, fftn=np.fft.fftn,
-                 ifftn=np.fft.ifftn, complex_dtype=np.complex):
+                 min_wt=0.0, normalize_kernel=False, allow_huge=False,
+                 fftn=np.fft.fftn, ifftn=np.fft.ifftn,
+                 complex_dtype=np.complex):
     """
     Convolve an ndarray with an nd-kernel.  Returns a convolved image with
     shape = array.shape.  Assumes kernel is centered.
 
     `convolve_fft` differs from `scipy.signal.fftconvolve` in a few ways:
 
-    * It can treat NaN's as zeros or interpolate over them.
-    * `inf` values are treated as `NaN`
+    * It can treat ``NaN`` values as zeros or interpolate over them.
+    * `inf` values are treated as ``NaN``
     * (optionally) It pads to the nearest 2^n size to improve FFT speed.
     * Its only valid `mode` is 'same' (i.e., the same shape array is returned)
     * It lets you use your own fft, e.g.,
@@ -242,65 +252,74 @@ def convolve_fft(array, kernel, boundary='fill', fill_value=0, crop=True,
     kernel : `numpy.ndarray`
           Will be normalized if `normalize_kernel` is set.  Assumed to be
           centered (i.e., shifts may result if your kernel is asymmetric)
-    boundary : {'fill', 'wrap'}
+    boundary : {'fill', 'wrap'}, optional
         A flag indicating how to handle boundaries:
 
             * 'fill': set values outside the array boundary to fill_value
               (default)
             * 'wrap': periodic boundary
 
-    interpolate_nan : bool
-        The convolution will be re-weighted assuming NAN values are meant to be
-        ignored, not treated as zero.  If this is off, all NaN values will be
+    interpolate_nan : bool, optional
+        The convolution will be re-weighted assuming ``NaN`` values are meant to be
+        ignored, not treated as zero.  If this is off, all ``NaN`` values will be
         treated as zero.
-    ignore_edge_zeros : bool
+    ignore_edge_zeros : bool, optional
         Ignore the zero-pad-created zeros.  This will effectively decrease
         the kernel area on the edges but will not re-normalize the kernel.
         This parameter may result in 'edge-brightening' effects if you're using
         a normalized kernel
-    min_wt : float
-        If ignoring NANs/zeros, force all grid points with a weight less than
-        this value to NAN (the weight of a grid point with *no* ignored
+    min_wt : float, optional
+        If ignoring ``NaN`` / zeros, force all grid points with a weight less than
+        this value to ``NaN`` (the weight of a grid point with *no* ignored
         neighbors is 1.0).
         If `min_wt` == 0.0, then all zero-weight points will be set to zero
-        instead of NAN (which they would be otherwise, because 1/0 = nan).
+        instead of ``NaN`` (which they would be otherwise, because 1/0 = nan).
         See the examples below
-    normalize_kernel : function or boolean
+    normalize_kernel : function or boolean, optional
         If specified, this is the function to divide kernel by to normalize it.
-        e.g., normalize_kernel=np.sum means that kernel will be modified to be:
-        kernel = kernel / np.sum(kernel).  If True, defaults to
-        normalize_kernel = np.sum
+        e.g., ``normalize_kernel=np.sum`` means that kernel will be modified to be:
+        ``kernel = kernel / np.sum(kernel)``.  If True, defaults to
+        ``normalize_kernel = np.sum``.
 
     Other Parameters
     ----------------
-    fft_pad : bool
+    fft_pad : bool, optional
         Default on.  Zero-pad image to the nearest 2^n
-    psf_pad : bool
+    psf_pad : bool, optional
         Default off.  Zero-pad image to be at least the sum of the image sizes
         (in order to avoid edge-wrapping when smoothing)
-    crop : bool
+    crop : bool, optional
         Default on.  Return an image of the size of the largest input image.
         If the images are asymmetric in opposite directions, will return the
         largest image in both directions.
         For example, if an input image has shape [100,3] but a kernel with shape
         [6,6] is used, the output will be [100,6].
-    return_fft : bool
+    return_fft : bool, optional
         Return the fft(image)*fft(kernel) instead of the convolution (which is
         ifft(fft(image)*fft(kernel))).  Useful for making PSDs.
-    nthreads : int
-        if fftw3 is installed, can specify the number of threads to allow FFTs
-        to use.  Probably only helpful for large arrays
-    fftn, ifftn : functions
+    fftn, ifftn : functions, optional
         The fft and inverse fft functions.  Can be overridden to use your own
         ffts, e.g. an fftw3 wrapper or scipy's fftn, e.g.
         `fftn=scipy.fftpack.fftn`
-    complex_dtype : np.complex
+    complex_dtype : np.complex, optional
         Which complex dtype to use.  `numpy` has a range of options, from 64 to
         256.
+    quiet : bool, optional
+        Silence warning message about NaN interpolation
+    allow_huge : bool, optional
+        Allow huge arrays in the FFT?  If False, will raise an exception if the
+        array or kernel size is >1 GB
+
+    Raises
+    ------
+    ValueError:
+        If the array is bigger than 1 GB after padding, will raise this exception
+        unless allow_huge is True
 
     See Also
     --------
-    convolve : Convolve is a non-fft version of this code.
+    convolve : Convolve is a non-fft version of this code.  It is more
+               memory efficient and for small kernels can be faster.
 
     Returns
     -------
@@ -354,7 +373,26 @@ def convolve_fft(array, kernel, boundary='fill', fill_value=0, crop=True,
     if isinstance(kernel, Kernel):
         kernel = kernel.array
         if isinstance(array, Kernel):
-            raise Exception("Can't convolve two kernels. Use convolve() instead.")
+            raise TypeError("Can't convolve two kernels. Use convolve() instead.")
+
+    # Convert array dtype to complex
+    # and ensure that list inputs become arrays
+    array = np.asarray(array, dtype=np.complex)
+    kernel = np.asarray(kernel, dtype=np.complex)
+
+    # Check that the number of dimensions is compatible
+    if array.ndim != kernel.ndim:
+        raise ValueError("Image and kernel must have same number of "
+                         "dimensions")
+
+    arrayshape = array.shape
+    kernshape = kernel.shape
+
+    array_size_B = np.product(arrayshape)*np.dtype(complex_dtype).itemsize
+    if array_size_B > 1024**3 and not allow_huge:
+        raise ValueError("Size Error: Arrays will be %s.  Use "
+                         "allow_huge=True to override this exception."
+                         % human_file_size(array_size_B))
 
     # mask catching - masks must be turned into NaNs for use later
     if np.ma.is_masked(array):
@@ -366,25 +404,21 @@ def convolve_fft(array, kernel, boundary='fill', fill_value=0, crop=True,
         kernel = np.array(kernel)
         kernel[mask] = np.nan
 
-    # Convert array dtype to complex
-    array = np.asarray(array, dtype=np.complex)
-    kernel = np.asarray(kernel, dtype=np.complex)
-
-    # Check that the number of dimensions is compatible
-    if array.ndim != kernel.ndim:
-        raise Exception('array and kernel have differing number of dimensions')
-
-    # NAN and inf catching
+    # NaN and inf catching
     nanmaskarray = np.isnan(array) + np.isinf(array)
     array[nanmaskarray] = 0
     nanmaskkernel = np.isnan(kernel) + np.isinf(kernel)
     kernel[nanmaskkernel] = 0
     if ((nanmaskarray.sum() > 0 or nanmaskkernel.sum() > 0) and
             not interpolate_nan and not quiet):
-        warnings.warn("NOT ignoring nan values even though they are present "
+        warnings.warn("NOT ignoring NaN values even though they are present "
                       " (they are treated as 0)", AstropyUserWarning)
 
     if normalize_kernel is True:
+        if kernel.sum() < 1. / MAX_NORMALIZATION:
+            raise Exception("The kernel can't be normalized, because its sum is "
+                            "close to zero. The sum of the given kernel is < {0}"
+                            .format(1. / MAX_NORMALIZATION))
         kernel = kernel / kernel.sum()
         kernel_is_normalized = True
     elif normalize_kernel:
@@ -419,15 +453,10 @@ def convolve_fft(array, kernel, boundary='fill', fill_value=0, crop=True,
         raise NotImplementedError("The 'extend' option is not implemented "
                                   "for fft-based convolution")
 
-    arrayshape = array.shape
-    kernshape = kernel.shape
-    if array.ndim != kernel.ndim:
-        raise ValueError("Image and kernel must have same number of "
-                         "dimensions")
     # find ideal size (power of 2) for fft.
     # Can add shapes because they are tuples
-    if fft_pad:
-        if psf_pad:
+    if fft_pad: # default=True
+        if psf_pad: # default=False
             # add the dimensions and then take the max (bigger)
             fsize = 2 ** np.ceil(np.log2(
                 np.max(np.array(arrayshape) + np.array(kernshape))))
@@ -435,7 +464,7 @@ def convolve_fft(array, kernel, boundary='fill', fill_value=0, crop=True,
             # add the shape lists (max of a list of length 4) (smaller)
             # also makes the shapes square
             fsize = 2 ** np.ceil(np.log2(np.max(arrayshape + kernshape)))
-        newshape = np.array([fsize for ii in range(array.ndim)])
+        newshape = np.array([fsize for ii in range(array.ndim)], dtype=int)
     else:
         if psf_pad:
             # just add the biggest dimensions
@@ -443,6 +472,20 @@ def convolve_fft(array, kernel, boundary='fill', fill_value=0, crop=True,
         else:
             newshape = np.array([np.max([imsh, kernsh])
                                  for imsh, kernsh in zip(arrayshape, kernshape)])
+
+    # For future reference, this can be used to predict "almost exactly" 
+    # how much *additional* memory will be used.
+    # size * (array + kernel + kernelfft + arrayfft + 
+    #         (kernel*array)fft + 
+    #         optional(weight image + weight_fft + weight_ifft) + 
+    #         optional(returned_fft))
+    #total_memory_used_GB = (np.product(newshape)*np.dtype(complex_dtype).itemsize
+    #                        * (5 + 3*((interpolate_nan or ignore_edge_zeros) and kernel_is_normalized))
+    #                        + (1 + (not return_fft)) *
+    #                          np.product(arrayshape)*np.dtype(complex_dtype).itemsize
+    #                        + np.product(arrayshape)*np.dtype(bool).itemsize
+    #                        + np.product(kernshape)*np.dtype(bool).itemsize)
+    #                        ) / 1024.**3
 
     # separate each dimension by the padding size...  this is to determine the
     # appropriate slice size to get back to the input dimensions
@@ -455,14 +498,23 @@ def convolve_fft(array, kernel, boundary='fill', fill_value=0, crop=True,
         kernslices += [slice(center - kerndimsize // 2,
                              center + (kerndimsize + 1) // 2)]
 
-    bigarray = np.ones(newshape, dtype=complex_dtype) * fill_value
-    bigkernel = np.zeros(newshape, dtype=complex_dtype)
-    bigarray[arrayslices] = array
-    bigkernel[kernslices] = kernel
+    if not np.all(newshape == arrayshape):
+        bigarray = np.ones(newshape, dtype=complex_dtype) * fill_value
+        bigarray[arrayslices] = array
+    else:
+        bigarray = array
+
+    if not np.all(newshape == kernshape):
+        bigkernel = np.zeros(newshape, dtype=complex_dtype)
+        bigkernel[kernslices] = kernel
+    else:
+        bigkernel = kernel
+
     arrayfft = fftn(bigarray)
     # need to shift the kernel so that, e.g., [0,0,1,0] -> [1,0,0,0] = unity
     kernfft = fftn(np.fft.ifftshift(bigkernel))
     fftmult = arrayfft * kernfft
+
     if (interpolate_nan or ignore_edge_zeros) and kernel_is_normalized:
         if ignore_edge_zeros:
             bigimwt = np.zeros(newshape, dtype=complex_dtype)
@@ -487,7 +539,7 @@ def convolve_fft(array, kernel, boundary='fill', fill_value=0, crop=True,
         # this check should be unnecessary; call it an insanity check
         raise ValueError("Encountered NaNs in convolve.  This is disallowed.")
 
-    # restore nans in original image (they were modified inplace earlier)
+    # restore NaNs in original image (they were modified inplace earlier)
     # We don't have to worry about masked arrays - if input was masked, it was
     # copied
     array[nanmaskarray] = np.nan

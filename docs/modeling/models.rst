@@ -2,23 +2,23 @@
 Creating and Evaluating Models
 ******************************
 
-The base class of all models is `~astropy.modeling.core.Model`, however
-fittable models should subclass `~astropy.modeling.core.ParametricModel`.
-Parametric models can be linear or nonlinear in a regression analysis sense.
+The base class of all models is `~astropy.modeling.Model`, however
+fittable models should subclass `~astropy.modeling.FittableModel`.
+Fittable models can be linear or nonlinear in a regression analysis sense.
 
 Model instances are callabale, that is, o evaluate a model it is called like a
 function. When possible the transformation is done using multiple
-:attr:`param_sets <astropy.modeling.core.Model.param_sets>`.  The number of
+:attr:`param_sets <astropy.modeling.Model.param_sets>`.  The number of
 parameter sets is stored in an attribute
-`~astropy.modeling.core.Model.param_dim`.
+`~astropy.modeling.Model.param_dim`.
 
-Parametric models also store a flat array of all parameter values.  When
+Fittable models also store a flat array of all parameter values.  When
 fitting, this array is directly modified by a subclass of
 `~astropy.modeling.fitting.Fitter`, in turn updating all of the model's
 parameter values simultaneously.  When fitting nonlinear models, the values of
 the parameters are used as initial guesses by the fitting class.
 
-Models have an `~astropy.modeling.core.Model.n_inputs` attribute, which shows
+Models have an `~astropy.modeling.Model.n_inputs` attribute, which shows
 how many coordinates the model expects as an input. All models expect
 coordinates as separate arguments.  For example a 2D model expects x and y to
 be passed separately, e.g. as two arrays or two lists. When a model has
@@ -29,16 +29,16 @@ parameter sets and ``x_shape, y_shape`` is the shape of the input array.  In
 all other cases the shape of the output array is the same as the shape of the
 input arrays.
 
-Models also have an attribute `~astropy.modeling.core.Model.n_outputs`, which
+Models also have an attribute `~astropy.modeling.Model.n_outputs`, which
 shows the number of output coordinates. The
-`~astropy.modeling.core.Model.n_inputs` and
-`~astropy.modeling.core.Model.n_outputs` attributes are used to chain
+`~astropy.modeling.Model.n_inputs` and
+`~astropy.modeling.Model.n_outputs` attributes are used to chain
 transforms by adding models in :class:`series
-<astropy.modeling.core.SerialCompositeModel>` or in :class:`parallel
-<astropy.modeling.core.SummedCompositeModel>`. Because composite models can
+<astropy.modeling.SerialCompositeModel>` or in :class:`parallel
+<astropy.modeling.SummedCompositeModel>`. Because composite models can
 be nested within other composite models, creating theoretically infinitely
 complex models, a mechanism to map input data to models is needed. In this case
-the input may be wrapped in a `~astropy.modeling.core.LabeledInput` object-- a
+the input may be wrapped in a `~astropy.modeling.LabeledInput` object-- a
 dict-like object whose items are ``{label: data}`` pairs.
 
 
@@ -159,7 +159,7 @@ The examples here assume this import statement was executed::
 
 In more complex cases the input and output may be mapped to transformations::
 
-    >>> x, y = np.mgrid[:5, :5]
+    >>> y, x = np.mgrid[:5, :5]
     >>> off = models.Shift(-3.2)
     >>> poly2 = models.Polynomial2D(2)
     >>> serial_composite_model = SerialCompositeModel(
@@ -167,25 +167,25 @@ In more complex cases the input and output may be mapped to transformations::
 
 The above composite transform will apply an inplace shift to x, followed by a
 2D polynomial and will save the result in an array, labeled 'z'.  To evaluate
-this model use a `~astropy.modeling.core.LabeledInput` object::
+this model use a `~astropy.modeling.LabeledInput` object::
 
     >>> labeled_data = LabeledInput([x, y], ['x', 'y'])
     >>> result = serial_composite_model(labeled_data)
 
-The output is also a `~astropy.modeling.core.LabeledInput` object and the
+The output is also a `~astropy.modeling.LabeledInput` object and the
 result is stored in label 'z'::
 
     >>> print(result)  # doctest: +SKIP
-    {'x': array([[-3.2, -3.2, -3.2, -3.2, -3.2],
-           [-2.2, -2.2, -2.2, -2.2, -2.2],
-           [-1.2, -1.2, -1.2, -1.2, -1.2],
-           [-0.2, -0.2, -0.2, -0.2, -0.2],
-           [ 0.8,  0.8,  0.8,  0.8,  0.8]]),
-     'y': array([[0, 1, 2, 3, 4],
-           [0, 1, 2, 3, 4],
-           [0, 1, 2, 3, 4],
-           [0, 1, 2, 3, 4],
-           [0, 1, 2, 3, 4]]),
+    {'x': array([[-3.2, -2.2, -1.2, -0.2,  0.8],
+           [-3.2, -2.2, -1.2, -0.2,  0.8],
+           [-3.2, -2.2, -1.2, -0.2,  0.8],
+           [-3.2, -2.2, -1.2, -0.2,  0.8],
+           [-3.2, -2.2, -1.2, -0.2,  0.8]]),
+     'y':  array([[0, 0, 0, 0, 0],
+           [1, 1, 1, 1, 1],
+           [2, 2, 2, 2, 2],
+           [3, 3, 3, 3, 3],
+           [4, 4, 4, 4, 4]]),
      'z': array([[ 0.,  0.,  0.,  0.,  0.],
            [ 0.,  0.,  0.,  0.,  0.],
            [ 0.,  0.,  0.,  0.,  0.],

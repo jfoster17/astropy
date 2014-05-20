@@ -4,17 +4,24 @@ import gzip
 import io
 import mmap
 import os
+import shutil
 import warnings
 import zipfile
 
 import numpy as np
 
+try:
+    import StringIO
+    HAVE_STRINGIO = True
+except ImportError:
+    HAVE_STRINGIO = False
+
 from ....io import fits
 from ....tests.helper import pytest, raises, catch_warnings
-
 from . import FitsTestCase
 from .util import ignore_warnings
 from ..convenience import _getext
+from ..diff import FITSDiff
 from ..file import _File
 
 
@@ -70,23 +77,28 @@ class TestCore(FitsTestCase):
         table = hdulist[1]
         assert table.data.dtype.names == ('c1', 'c2', 'c3', 'c4')
         assert table.columns.names == ['c1', 'c2', 'c3', 'c4']
-        table.columns.del_col('c1')
+        table.columns.del_col(str('c1'))
         assert table.data.dtype.names == ('c2', 'c3', 'c4')
         assert table.columns.names == ['c2', 'c3', 'c4']
 
-        table.columns.del_col('c3')
+        table.columns.del_col(str('c3'))
         assert table.data.dtype.names == ('c2', 'c4')
         assert table.columns.names == ['c2', 'c4']
 
-        table.columns.add_col(fits.Column('foo', '3J'))
+        table.columns.add_col(fits.Column(str('foo'), str('3J')))
         assert table.data.dtype.names == ('c2', 'c4', 'foo')
         assert table.columns.names == ['c2', 'c4', 'foo']
 
         hdulist.writeto(self.temp('test.fits'), clobber=True)
-        with fits.open(self.temp('test.fits')) as hdulist:
-            table = hdulist[1]
-            assert table.data.dtype.names == ('c2', 'c4', 'foo')
-            assert table.columns.names == ['c2', 'c4', 'foo']
+        with ignore_warnings():
+            # TODO: The warning raised by this test is actually indication of a
+            # bug and should *not* be ignored. But as it is a known issue we
+            # hide it for now.  See
+            # https://github.com/spacetelescope/PyFITS/issues/44
+            with fits.open(self.temp('test.fits')) as hdulist:
+                table = hdulist[1]
+                assert table.data.dtype.names == ('c2', 'c4', 'foo')
+                assert table.columns.names == ['c2', 'c4', 'foo']
 
     def test_update_header_card(self):
         """A very basic test for the Header.update method--I'd like to add a
@@ -260,8 +272,8 @@ class TestCore(FitsTestCase):
 
     def test_extension_name_case_sensitive(self):
         """
-        Tests that setting fits.EXTENSION_NAME_CASE_SENSITIVE at runtime
-        works.
+        Tests that setting fits.conf.extension_name_case_sensitive at
+        runtime works.
         """
 
         if 'PYFITS_EXTENSION_NAME_CASE_SENSITIVE' in os.environ:
@@ -272,14 +284,11 @@ class TestCore(FitsTestCase):
         assert hdu.name == 'SCI'
         assert hdu.header['EXTNAME'] == 'SCI'
 
-        try:
-            fits.EXTENSION_NAME_CASE_SENSITIVE.set(True)
+        with fits.conf.set_temp('extension_name_case_sensitive', True):
             hdu = fits.ImageHDU()
             hdu.name = 'sCi'
             assert hdu.name == 'sCi'
             assert hdu.header['EXTNAME'] == 'sCi'
-        finally:
-            fits.EXTENSION_NAME_CASE_SENSITIVE.set(False)
 
         hdu.name = 'sCi'
         assert hdu.name == 'SCI'
@@ -453,7 +462,7 @@ class TestFileFunctions(FitsTestCase):
 
         try:
             fits.open(self.temp('foobar.fits'))
-        except IOError, e:
+        except IOError as e:
             assert 'File does not exist' in str(e)
         except:
             raise
@@ -625,7 +634,7 @@ class TestFileFunctions(FitsTestCase):
 
         try:
             self.copy_file('test0.fits')
-            with warnings.catch_warnings(record=True) as w:
+            with catch_warnings() as w:
                 with fits.open(self.temp('test0.fits'), mode='update',
                                memmap=True) as h:
                     h[1].data[0, 0] = 999
@@ -639,6 +648,106 @@ class TestFileFunctions(FitsTestCase):
         finally:
             mmap.mmap = old_mmap
             _File._mmap_available = None
+
+    def test_mmap_unwriteable(self):
+        """Regression test for
+        https://github.com/astropy/astropy/issues/968
+
+        Temporarily patches mmap.mmap to exhibit platform-specific bad
+        behavior.
+        """
+
+        class MockMmap(mmap.mmap):
+            def flush(self):
+                raise mmap.error('flush is broken on this platform')
+
+        old_mmap = mmap.mmap
+        mmap.mmap = MockMmap
+
+        # Force the mmap test to be rerun
+        _File._mmap_available = None
+
+        try:
+            # TODO: Use self.copy_file once it's merged into Astropy
+            shutil.copy(self.data('test0.fits'), self.temp('test0.fits'))
+            with catch_warnings() as w:
+                with fits.open(self.temp('test0.fits'), mode='update',
+                               memmap=True) as h:
+                    h[1].data[0, 0] = 999
+
+                assert len(w) == 1
+                assert 'mmap.flush is unavailable' in str(w[0].message)
+
+            # Double check that writing without mmap still worked
+            with fits.open(self.temp('test0.fits')) as h:
+                assert h[1].data[0, 0] == 999
+        finally:
+            mmap.mmap = old_mmap
+            _File._mmap_available = None
+
+    def test_uncloseable_file(self):
+        """
+        Regression test for https://github.com/astropy/astropy/issues/2356
+
+        Demonstrates that FITS files can still be read from "file-like" objects
+        that don't have an obvious "open" or "closed" state.
+        """
+
+        class MyFileLike(object):
+            def __init__(self, foobar):
+                self._foobar = foobar
+
+            def read(self, n):
+                return self._foobar.read(n)
+
+            def seek(self, offset, whence=os.SEEK_SET):
+                self._foobar.seek(offset, whence)
+
+            def tell(self):
+                return self._foobar.tell()
+
+
+        with open(self.data('test0.fits'), 'rb') as f:
+            fileobj = MyFileLike(f)
+
+            with fits.open(fileobj) as hdul1:
+                with fits.open(self.data('test0.fits')) as hdul2:
+                    assert hdul1.info(output=False) == hdul2.info(output=False)
+                    for hdu1, hdu2 in zip(hdul1, hdul2):
+                        assert hdu1.header == hdu2.header
+                        if hdu1.data is not None and hdu2.data is not None:
+                            assert np.all(hdu1.data == hdu2.data)
+
+    @pytest.mark.skipif('not HAVE_STRINGIO')
+    def test_write_stringio(self):
+        """
+        Regression test for https://github.com/astropy/astropy/issues/2463
+
+        Only test against `StringIO.StringIO` on Python versions that have it.
+        Note: `io.StringIO` is not supported for this purpose as it does not
+        accept a bytes stream.
+        """
+
+        self._test_write_string_bytes_io(StringIO.StringIO())
+
+    def test_write_bytesio(self):
+        """
+        Regression test for https://github.com/astropy/astropy/issues/2463
+
+        Test againt `io.BytesIO`.  `io.StringIO` is not supported.
+        """
+
+        self._test_write_string_bytes_io(io.BytesIO())
+
+    def _test_write_string_bytes_io(self, fileobj):
+        """
+        Implemented for both test_write_stringio and test_write_bytesio.
+        """
+
+        with fits.open(self.data('test0.fits')) as hdul:
+            hdul.writeto(fileobj)
+            hdul2 = fits.HDUList.fromstring(fileobj.getvalue())
+            assert FITSDiff(hdul, hdul2).identical
 
     def _make_gzip_file(self, filename='test0.fits.gz'):
         gzfile = self.temp(filename)
@@ -737,3 +846,8 @@ class TestStreamingFunctions(FitsTestCase):
         hd['NAXIS2'] = 5
         hd['EXTEND'] = True
         return fits.StreamingHDU(fileobj, hd)
+
+    def test_blank_ignore(self):
+
+        with fits.open(self.data('blank.fits'), ignore_blank=True) as f:
+            assert f[0].data.flat[0] == 2

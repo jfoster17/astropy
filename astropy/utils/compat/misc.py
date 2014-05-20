@@ -12,6 +12,9 @@ Includes the following fixes:
   alias to `inspect.getmodule` if the stdlib version is correct, but for
   versions of python with the bug, it uses an internal patched version.
 
+* The `contextlib.ignored` context manager, which is only available in Python
+  3.4 or greater.
+
 """
 
 from __future__ import (absolute_import, division, print_function,
@@ -24,8 +27,29 @@ import sys
 from functools import wraps
 
 
-__all__ = [
-    'inspect_getmodule', 'invalidate_caches', 'override__dir__']
+__all__ = ['inspect_getmodule', 'invalidate_caches', 'override__dir__',
+           'ignored', 'possible_filename']
+
+
+def possible_filename(filename):
+    """
+    Determine if the ``filename`` argument is an allowable type for a filename.
+
+    In Python 3.3 use of non-unicode filenames on system calls such as
+    `os.stat` and others that accept a filename argument was deprecated (and
+    may be removed outright in the future).
+
+    Therefore this returns `True` in all cases except for `bytes` strings in
+    Windows on Python >= 3.3.
+    """
+
+    if isinstance(filename, six.text_type):
+        return True
+    elif isinstance(filename, six.binary_type):
+        return not (sys.platform == 'win32' and
+                    sys.version_info[:2] >= (3, 3))
+
+    return False
 
 
 def _patched_getmodule(object, _filename=None):
@@ -143,3 +167,30 @@ def override__dir__(f):
             return sorted(members)
 
     return override__dir__wrapper
+
+
+try:
+    from contextlib import ignored
+except ImportError:
+    from contextlib import contextmanager
+    @contextmanager
+    def ignored(*exceptions):
+        """A context manager for ignoring exceptions.  Equivalent to::
+
+            try:
+                <body>
+            except exceptions:
+                pass
+
+        Example::
+
+            >>> import os
+            >>> with ignored(OSError):
+            ...     os.remove('file-that-does-not-exist')
+
+        """
+
+        try:
+            yield
+        except exceptions:
+            pass

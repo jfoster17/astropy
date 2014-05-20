@@ -15,7 +15,7 @@ from ...utils.compat.fractions import Fraction
 def get_grouped_by_powers(bases, powers):
     """
     Groups the powers and bases in the given
-    `~astropy.units.core.CompositeUnit` into positive powers and
+    `~astropy.units.CompositeUnit` into positive powers and
     negative powers for easy display on either side of a solidus.
 
     Parameters
@@ -83,15 +83,16 @@ def decompose_to_known_units(unit, func):
 
     Parameters
     ----------
-    unit : `astropy.units.UnitBase` instance
+    unit : `~astropy.units.UnitBase` instance
 
     func : callable
-        This function will be called to determine if a given unit is "known".
-        If the unit is not known, this function should raise a `ValueError`.
+        This function will be called to determine if a given unit is
+        "known".  If the unit is not known, this function should raise a
+        `~.exceptions.ValueError`.
 
     Returns
     -------
-    unit : `astropy.units.UnitBase` instance
+    unit : `~astropy.units.UnitBase` instance
         A flattened unit.
     """
     from .. import core

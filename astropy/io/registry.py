@@ -1,12 +1,16 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
+
 import re
 import sys
 
 import numpy as np
 
 from ..utils import OrderedDict
-
+from ..extern import six
+from ..extern.six.moves import zip
 
 __all__ = ['register_reader', 'register_writer', 'register_identifier',
            'identify_format', 'get_reader', 'get_writer', 'read', 'write',
@@ -36,11 +40,13 @@ def get_formats(data_class=None):
         Table of available I/O formats
     """
     from ..table import Table
-    format_classes = sorted(set(_readers) | set(_writers))
+    format_classes = sorted(set(_readers) | set(_writers),
+                            key=lambda tup: tup[0])
     rows = []
 
     for format_class in format_classes:
-        if data_class is not None and format_class[1] is not data_class:
+        if (data_class is not None
+                and not _is_best_match(data_class, format_class[1], format_classes)):
             continue
 
         has_read = 'Yes' if format_class in _readers else 'No'
@@ -60,7 +66,7 @@ def get_formats(data_class=None):
         rows.append((format_class[1].__name__, format_class[0], has_read, has_write,
                      has_identify, deprecated))
 
-    data = zip(*rows) if rows else None
+    data = list(zip(*rows)) if rows else None
     format_table = Table(data, names=('Data class', 'Format', 'Read', 'Write',
                                       'Auto-identify', 'Deprecated'))
     format_table.sort(['Data class', 'Deprecated', 'Format'])
@@ -103,7 +109,7 @@ def _update__doc__(data_class, readwrite):
 
     # Get the available formats as a table, then munge the output of pformat() a bit and
     # put it into the docstring.
-    new_lines = format_table.pformat(max_lines=-1)
+    new_lines = format_table.pformat(max_lines=-1, max_width=80)
     table_rst_sep = re.sub('-', '=', new_lines[1])
     new_lines[1] = table_rst_sep
     new_lines.insert(0, table_rst_sep)
@@ -147,7 +153,7 @@ def register_reader(data_format, data_class, function, force=False):
     if not (data_format, data_class) in _readers or force:
         _readers[(data_format, data_class)] = function
     else:
-        raise Exception('Reader for format {0!r} and class {1!r} is '
+        raise Exception("Reader for format '{0}' and class '{1}' is "
                         'already defined'.format(data_format,
                                                  data_class.__name__))
 
@@ -174,7 +180,7 @@ def register_writer(data_format, data_class, function, force=False):
     if not (data_format, data_class) in _writers or force:
         _writers[(data_format, data_class)] = function
     else:
-        raise Exception('Writer for format {0!r} and class {1!r} is '
+        raise Exception("Writer for format '{0}' and class '{1}' is "
                         'already defined'.format(data_format,
                                                  data_class.__name__))
 
@@ -195,23 +201,23 @@ def register_identifier(data_format, data_class, identifier, force=False):
     identifier : function
         A function that checks the argument specified to `read` or `write` to
         determine whether the input can be interpreted as a table of type
-        `data_format`. This function should take the following arguments:
+        ``data_format``. This function should take the following arguments:
 
-           - `origin`: A string `read` or `write` identifying whether
+           - ``origin``: A string `read` or `write` identifying whether
              the file is to be opened for reading or writing.
-           - `path`: The path to the file.
-           - `fileobj`: An open file object to read the file's contents, or
+           - ``path``: The path to the file.
+           - ``fileobj``: An open file object to read the file's contents, or
              `None` if the file could not be opened.
-           - `*args`: A list of positional arguments to the `read` or
+           - ``*args``: A list of positional arguments to the `read` or
              `write` function.
-           - `**kwargs`: A list of keyword arguments to the `read` or
+           - ``**kwargs``: A list of keyword arguments to the `read` or
              `write` function.
 
-        One or both of `path` or `fileobj` may be `None`.  If they are
-        both `None`, the identifier will need to work from `args[0]`.
+        One or both of ``path`` or ``fileobj`` may be `None`.  If they are
+        both `None`, the identifier will need to work from ``args[0]``.
 
         The function should return True if the input can be identified
-        as being of format `data_format`, and False otherwise.
+        as being of format ``data_format``, and False otherwise.
     force : bool
         Whether to override any existing function if already present.
 
@@ -230,7 +236,7 @@ def register_identifier(data_format, data_class, identifier, force=False):
     if not (data_format, data_class) in _identifiers or force:
         _identifiers[(data_format, data_class)] = identifier
     else:
-        raise Exception('Identifier for format {0!r} and class {1!r} is '
+        raise Exception("Identifier for format '{0}' and class '{1}' is "
                         'already defined'.format(data_format,
                                                  data_class.__name__))
 
@@ -239,7 +245,7 @@ def identify_format(origin, data_class_required, path, fileobj, args, kwargs):
     # Loop through identifiers to see which formats match
     valid_formats = []
     for data_format, data_class in _identifiers:
-        if data_class is data_class_required:
+        if _is_best_match(data_class_required, data_class, _identifiers):
             if _identifiers[(data_format, data_class)](
                 origin, path, fileobj, *args, **kwargs):
                 valid_formats.append(data_format)
@@ -258,22 +264,27 @@ def _get_format_table_str(data_class, readwrite):
 
 
 def get_reader(data_format, data_class):
-    if (data_format, data_class) in _readers:
-        return _readers[(data_format, data_class)]
+    # Get all the readers that work for `data_format`
+    readers = [(fmt, cls) for fmt, cls in _readers if fmt == data_format]
+    for reader_format, reader_class in readers:
+        if _is_best_match(data_class, reader_class, readers):
+            return _readers[(reader_format, reader_class)]
     else:
         format_table_str = _get_format_table_str(data_class, 'Read')
-        raise Exception('No reader defined for format {0!r} and class {1!r}.\n'
+        raise Exception("No reader defined for format '{0}' and class '{1}'.\n"
                         'The available formats are:\n'
                         '{2}'
                         .format(data_format, data_class.__name__, format_table_str))
 
 
 def get_writer(data_format, data_class):
-    if (data_format, data_class) in _writers:
-        return _writers[(data_format, data_class)]
+    writers = [(fmt, cls) for fmt, cls in _writers if fmt == data_format]
+    for writer_format, writer_class in writers:
+        if _is_best_match(data_class, writer_class, writers):
+            return _writers[(writer_format, writer_class)]
     else:
         format_table_str = _get_format_table_str(data_class, 'Write')
-        raise Exception('No writer defined for format {0!r} and class {1!r}.\n'
+        raise Exception("No writer defined for format '{0}' and class '{1}'.\n"
                         'The available formats are:\n'
                         '{2}'
                         .format(data_format, data_class.__name__, format_table_str))
@@ -298,7 +309,7 @@ def read(cls, *args, **kwargs):
             fileobj = None
 
             if len(args):
-                if isinstance(args[0], basestring):
+                if isinstance(args[0], six.string_types):
                     from ..utils.data import get_readable_fileobj
                     path = args[0]
                     try:
@@ -316,16 +327,25 @@ def read(cls, *args, **kwargs):
                 'read', cls, path, fileobj, args, kwargs)
 
         reader = get_reader(format, cls)
-        table = reader(*args, **kwargs)
+        data = reader(*args, **kwargs)
 
-        if not isinstance(table, cls):
-            raise TypeError(
-                "reader should return a {0} instance".format(cls.__name__))
+        if not isinstance(data, cls):
+            if issubclass(cls, data.__class__):
+                # User has read with a subclass where only the parent class is
+                # registered.  This returns the parent class, so try coercing to 
+                # desired subclass.
+                try:
+                    data = cls(data)
+                except:
+                    raise TypeError('could not convert reader output to {0} class'
+                                    .format(cls.__name__))
+            else:
+                raise TypeError("reader should return a {0} instance".format(cls.__name__))
     finally:
         if ctx is not None:
             ctx.__exit__(*sys.exc_info())
 
-    return table
+    return data
 
 
 def write(data, *args, **kwargs):
@@ -344,7 +364,7 @@ def write(data, *args, **kwargs):
         path = None
         fileobj = None
         if len(args):
-            if isinstance(args[0], basestring):
+            if isinstance(args[0], six.string_types):
                 path = args[0]
                 fileobj = None
             elif hasattr(args[0], 'read'):
@@ -357,6 +377,20 @@ def write(data, *args, **kwargs):
     writer = get_writer(format, data.__class__)
     writer(data, *args, **kwargs)
 
+
+def _is_best_match(class1, class2, format_classes):
+    """
+    Determine if class2 is the "best" match for class1 in the list
+    of classes.  It is assumed that (class2 in classes) is True.
+    class2 is the the best match if:
+      - class1 is class2 => class1 was directly registered.
+      - OR class1 is a subclass of class2 and class1 is not in classes.
+        In this case the subclass will use the parent reader/writer.
+    """
+    classes = [cls for fmt, cls in format_classes]
+    is_best_match = ((class1 is class2) or (issubclass(class1, class2)
+                                            and class1 not in classes))
+    return is_best_match
 
 def _get_valid_format(mode, cls, path, fileobj, args, kwargs):
     """
@@ -379,6 +413,6 @@ def _get_valid_format(mode, cls, path, fileobj, args, kwargs):
     elif len(valid_formats) > 1:
         raise Exception(
             "Format is ambiguous - options are: {0}".format(
-                ', '.join(sorted(valid_formats))))
+                ', '.join(sorted(valid_formats, key=lambda tup: tup[0]))))
 
     return valid_formats[0]

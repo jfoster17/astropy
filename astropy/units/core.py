@@ -9,29 +9,28 @@ from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 from ..extern import six
 from ..extern.six.moves import zip
+if six.PY2:
+    import cmath
 
 import inspect
-import numbers
-import sys
 import textwrap
 import warnings
 import numpy as np
 
-from ..utils.compat.fractions import Fraction
 from ..utils.exceptions import AstropyWarning
-from ..utils.misc import isiterable
-from .utils import is_effectively_unity
+from ..utils.misc import isiterable, InheritDocstrings
+from .utils import is_effectively_unity, sanitize_scale, validate_power
 from . import format as unit_format
 
 # TODO: Support functional units, e.g. log(x), ln(x)
 
 __all__ = [
-    'UnitsError', 'UnitsException', 'UnitsWarning', 'UnitBase',
-    'NamedUnit', 'IrreducibleUnit', 'Unit', 'def_unit',
-    'CompositeUnit', 'PrefixUnit', 'UnrecognizedUnit',
-    'get_current_unit_registry', 'set_enabled_units',
-    'add_enabled_units', 'set_enabled_equivalencies',
-    'add_enabled_equivalencies', 'dimensionless_unscaled']
+    'UnitsError', 'UnitsWarning', 'UnitBase', 'NamedUnit',
+    'IrreducibleUnit', 'Unit', 'def_unit', 'CompositeUnit',
+    'PrefixUnit', 'UnrecognizedUnit', 'get_current_unit_registry',
+    'set_enabled_units', 'add_enabled_units',
+    'set_enabled_equivalencies', 'add_enabled_equivalencies',
+    'dimensionless_unscaled', 'one']
 
 
 def _flatten_units_collection(items):
@@ -227,7 +226,8 @@ class _UnitRegistry(object):
         Parameters
         ----------
         equivalencies : list of equivalent pairs
-            E.g., as returned by `astropy.units.angles_dimensionless`.
+            E.g., as returned by
+            `~astropy.units.equivalencies.dimensionless_angles`.
         """
         self._reset_equivalencies()
         return self.add_enabled_equivalencies(equivalencies)
@@ -245,7 +245,8 @@ class _UnitRegistry(object):
         Parameters
         ----------
         equivalencies : list of equivalent pairs
-            E.g., as returned by `astropy.units.angles_dimensionless`.
+            E.g., as returned by
+            `~astropy.units.equivalencies.dimensionless_angles`.
         """
         # pre-normalize list to help catch mistakes
         equivalencies = _normalize_equivalencies(equivalencies)
@@ -387,7 +388,8 @@ def set_enabled_equivalencies(equivalencies):
     Parameters
     ----------
     equivalencies : list of equivalent pairs
-        E.g., as returned by `astropy.units.angles_dimensionless`.
+        E.g., as returned by
+        `~astropy.units.equivalencies.dimensionless_angles`.
 
     Examples
     --------
@@ -421,7 +423,8 @@ def add_enabled_equivalencies(equivalencies):
     Parameters
     ----------
     equivalencies : list of equivalent pairs
-        E.g., as returned by `astropy.units.angles_dimensionless`.
+        E.g., as returned by
+        `~astropy.units.equivalencies.dimensionless_angles`.
     """
     # get a context with a new registry, which is a copy of the current one
     context = _UnitContext(get_current_unit_registry())
@@ -434,20 +437,15 @@ class UnitsError(Exception):
     """
     The base class for unit-specific exceptions.
     """
-    pass
-
-
-# deprecated alias.  Remove in astropy 0.4
-UnitsException = UnitsError
 
 
 class UnitsWarning(AstropyWarning):
     """
     The base class for unit-specific exceptions.
     """
-    pass
 
 
+@six.add_metaclass(InheritDocstrings)
 class UnitBase(object):
     """
     Abstract base class for units.
@@ -481,17 +479,21 @@ class UnitBase(object):
     def __bytes__(self):
         """Return string representation for unit"""
         return unit_format.Generic().to_string(self).encode('ascii')
-    if sys.version_info[0] < 3:
+    if six.PY2:
         __str__ = __bytes__
 
     def __unicode__(self):
         """Return string representation for unit"""
         return unit_format.Generic().to_string(self)
-    if sys.version_info[0] >= 3:
+    if six.PY3:
         __str__ = __unicode__
 
     def __repr__(self):
-        return 'Unit("' + unit_format.Generic().to_string(self) + '")'
+        string = unit_format.Generic().to_string(self)
+        if six.PY2:
+            string = string.encode('unicode_escape')
+
+        return 'Unit("{0}")'.format(string)
 
     def _get_physical_type_id(self):
         """
@@ -554,7 +556,7 @@ class UnitBase(object):
         """
         Return the powers of the unit.
         """
-        return [1.0]
+        return [1]
 
     def to_string(self, format='generic'):
         """
@@ -562,7 +564,7 @@ class UnitBase(object):
 
         Parameters
         ----------
-        format : `astropy.format.Base` instance or str
+        format : `astropy.units.format.Base` instance or str
             The name of a format or a formatter object.  If not
             provided, defaults to the generic format.
         """
@@ -602,25 +604,6 @@ class UnitBase(object):
             normalized += get_current_unit_registry().equivalencies
 
         return normalized
-
-    def _validate_power(self, p):
-        if isinstance(p, tuple) and len(p) == 2:
-            p = Fraction(p[0], p[1])
-
-        if isinstance(p, numbers.Rational):
-            # If the fractional power can be represented *exactly* as
-            # a floating point number, we convert it to a float, to
-            # make the math much faster, otherwise, we use a
-            # `fractions.Fraction` object to avoid losing precision.
-            denom = p.denominator
-            # This is bit-twiddling hack to see if the integer is a
-            # power of two
-            if (denom & (denom - 1)) == 0:
-                p = float(p)
-        else:
-            p = float(p)
-
-        return p
 
     def __pow__(self, p):
         return CompositeUnit(1, [self], [p])
@@ -675,11 +658,10 @@ class UnitBase(object):
         from .quantity import Quantity
         return m * Quantity(1, self)
 
-    if sys.version_info[0] >= 3:  # pragma: no cover
-        def __hash__(self):
-            # Since this class defines __eq__, it will become unhashable
-            # on Python 3.x, so we need to define our own hash.
-            return id(self)
+    def __hash__(self):
+        # This must match the hash used in CompositeUnit for a unit
+        # with only one base and no scale or power.
+        return hash((str(self.scale), self.name, str('1')))
 
     def __eq__(self, other):
         if self is other:
@@ -716,7 +698,7 @@ class UnitBase(object):
 
     def is_equivalent(self, other, equivalencies=[]):
         """
-        Returns `True` if this unit is equivalent to `other`.
+        Returns `True` if this unit is equivalent to ``other``.
 
         Parameters
         ----------
@@ -746,7 +728,7 @@ class UnitBase(object):
         return self._is_equivalent(other, equivalencies)
 
     def _is_equivalent(self, other, equivalencies=[]):
-        """Returns True if this unit is equivalent to `other`.
+        """Returns `True` if this unit is equivalent to `other`.
         See `is_equivalent`, except that a proper Unit object should be
         given (i.e., no string) and that the equivalency list should be
         normalized using `_normalize_equivalencies`.
@@ -832,7 +814,7 @@ class UnitBase(object):
 
     def get_converter(self, other, equivalencies=[]):
         """
-        Return the conversion function to convert values from `self`
+        Return the conversion function to convert values from ``self``
         to the specified unit.
 
         Parameters
@@ -1342,8 +1324,8 @@ class UnitBase(object):
         Returns
         -------
         units : list of `UnitBase`
-            A list of unit objects that match `u`.  A subclass of
-            `list` (`EquivalentUnitsList`) is returned that
+            A list of unit objects that match ``u``.  A subclass of
+            `list` (``EquivalentUnitsList``) is returned that
             pretty-prints the list of units when output.
         """
         results = self.compose(
@@ -1543,7 +1525,7 @@ class NamedUnit(UnitBase):
             namespace[name] = self
 
 
-def _recreate_irreducible_unit(names, registered):
+def _recreate_irreducible_unit(cls, names, registered):
     """
     This is used to reconstruct units when passed around by
     multiprocessing.
@@ -1552,7 +1534,7 @@ def _recreate_irreducible_unit(names, registered):
     if names[0] in registry:
         return registry[names[0]]
     else:
-        unit = IrreducibleUnit(names)
+        unit = cls(names)
         if registered:
             get_current_unit_registry().add_enabled_units([unit])
 
@@ -1574,7 +1556,7 @@ class IrreducibleUnit(NamedUnit):
         # understands how to recreate the Unit on the other side.
         registry = get_current_unit_registry().registry
         return (_recreate_irreducible_unit,
-                (list(self.names), self.name in registry),
+                (self.__class__, list(self.names), self.name in registry),
                 self.__dict__)
 
     def decompose(self, bases=set()):
@@ -1596,7 +1578,6 @@ class IrreducibleUnit(NamedUnit):
                 "bases".format(self))
 
         return self
-    decompose.__doc__ = UnitBase.decompose.__doc__
 
 
 class UnrecognizedUnit(IrreducibleUnit):
@@ -1610,20 +1591,22 @@ class UnrecognizedUnit(IrreducibleUnit):
     st : str
         The name of the unit.
     """
-    def __init__(self, st):
-        IrreducibleUnit.__init__(self, st)
+    # For UnrecognizedUnits, we want to use "standard" Python
+    # pickling, not the special case that is used for
+    # IrreducibleUnits.
+    __reduce__ = object.__reduce__
 
     def __repr__(self):
         return "UnrecognizedUnit({0})".format(str(self))
 
     def __bytes__(self):
         return self.name.encode('ascii', 'replace')
-    if sys.version_info[0] < 3:
+    if six.PY2:
         __str__ = __bytes__
 
     def __unicode__(self):
         return self.name
-    if sys.version_info[0] >= 3:
+    if six.PY3:
         __str__ = __unicode__
 
     def to_string(self, format='generic'):
@@ -1662,7 +1645,7 @@ class UnrecognizedUnit(IrreducibleUnit):
         return False
 
 
-class _UnitMetaClass(type):
+class _UnitMetaClass(InheritDocstrings):
     """
     This metaclass exists because the Unit constructor should
     sometimes return instances that already exist.  This "overrides"
@@ -1718,7 +1701,7 @@ class _UnitMetaClass(type):
                 format = 'generic'
 
             f = unit_format.get_format(format)
-            if sys.version_info[0] >= 3 and isinstance(s, bytes):
+            if six.PY3 and isinstance(s, bytes):
                 s = s.decode('ascii')
 
             try:
@@ -1772,7 +1755,7 @@ class Unit(NamedUnit):
       string is in, by default ``"generic"``.  For a description of
       the available formats, see `astropy.units.format`.
 
-      The optional `parse_strict` keyword controls what happens when an
+      The optional ``parse_strict`` keyword controls what happens when an
       unrecognized unit string is passed in.  It may be one of the following:
 
          - ``'raise'``: (default) raise a ValueError exception.
@@ -1856,22 +1839,22 @@ class Unit(NamedUnit):
 
     def decompose(self, bases=set()):
         return self._represents.decompose(bases=bases)
-    decompose.__doc__ = UnitBase.decompose.__doc__
 
     def is_unity(self):
         return self._represents.is_unity()
-    is_unity.__doc__ = UnitBase.is_unity.__doc__
+
+    def __hash__(self):
+        return hash(self.name) + hash(self._represents)
 
 
 class PrefixUnit(Unit):
     """
     A unit that is simply a SI-prefixed version of another unit.
 
-    For example, `mm` is a `PrefixUnit` of ``.001 * m``.
+    For example, ``mm`` is a `PrefixUnit` of ``.001 * m``.
 
     The constructor is the same as for `Unit`.
     """
-    pass
 
 
 class CompositeUnit(UnitBase):
@@ -1880,7 +1863,7 @@ class CompositeUnit(UnitBase):
     units.
 
     Direct use of this class is not recommended. Instead use the
-    factory function `Unit(...)` and arithmetic operators to compose
+    factory function `Unit` and arithmetic operators to compose
     units.
 
     Parameters
@@ -1904,12 +1887,12 @@ class CompositeUnit(UnitBase):
         # kwarg `_error_check` is False, the error checking is turned
         # off.
         if _error_check:
-            if is_effectively_unity(scale):
-                scale = 1.0
+            scale = sanitize_scale(scale)
             for base in bases:
                 if not isinstance(base, UnitBase):
-                    raise TypeError("bases must be sequence of UnitBase instances")
-            powers = [self._validate_power(p) for p in powers]
+                    raise TypeError(
+                        "bases must be sequence of UnitBase instances")
+            powers = [validate_power(p, support_tuples=True) for p in powers]
 
         self._scale = scale
         self._bases = bases
@@ -1960,8 +1943,15 @@ class CompositeUnit(UnitBase):
                 for base in bases:
                     try:
                         scale *= unit._to(base) ** power
-                    except:
+                    except UnitsError:
                         pass
+                    except ValueError:
+                        # on python2, sqrt(negative number) does not
+                        # automatically lead to a complex number, but this is
+                        # needed for the corner case of mag=-0.4*dex
+                        scale *= cmath.exp(power * cmath.log(unit._to(base)))
+                        unit = base
+                        break
                     else:
                         unit = base
                         break
@@ -1980,7 +1970,13 @@ class CompositeUnit(UnitBase):
                 b = b.decompose(bases=bases)
 
             if isinstance(b, CompositeUnit):
-                scale *= b._scale ** p
+                try:
+                    scale *= b._scale ** p
+                except ValueError:
+                    # on python2, sqrt(negative number) does not
+                    # automatically lead to a complex number, but this is
+                    # needed for the corner case of mag=-0.4*dex
+                    scale *= cmath.exp(p * cmath.log(b._scale))
                 for b_sub, p_sub in zip(b._bases, b._powers):
                     scale = add_unit(b_sub, p_sub * p, scale)
             else:
@@ -1990,12 +1986,9 @@ class CompositeUnit(UnitBase):
         new_parts.sort(key=lambda x: (-x[1], getattr(x[0], 'name', '')))
 
         self._bases = [x[0] for x in new_parts]
-        self._powers = [x[1] for x in new_parts]
-
-        if is_effectively_unity(scale):
-            scale = 1.0
-
-        self._scale = scale
+        self._powers = [validate_power(x[1], support_tuples=True)
+                        for x in new_parts]
+        self._scale = sanitize_scale(scale)
 
     def __copy__(self):
         """
@@ -2021,7 +2014,6 @@ class CompositeUnit(UnitBase):
         if len(bases) == 0:
             self._decomposed_cache = x
         return x
-    decompose.__doc__ = UnitBase.decompose.__doc__
 
     def is_unity(self):
         unit = self.decompose()
@@ -2105,7 +2097,8 @@ def _add_prefixes(u, excludes=[], namespace=None, prefixes=False):
                 names.append(prefix + alias)
 
         if len(names):
-            PrefixUnit(names, CompositeUnit(factor, [u], [1], _error_check=False),
+            PrefixUnit(names, CompositeUnit(factor, [u], [1],
+                                            _error_check=False),
                        namespace=namespace, format=format)
 
 
@@ -2140,8 +2133,8 @@ def def_unit(s, represents=None, register=None, doc=None,
 
     prefixes : bool or list, optional
         When `True`, generate all of the SI prefixed versions of the
-        unit as well.  For example, for a given unit `m`, will
-        generate `mm`, `cm`, `km`, etc.  When a list, it is a list of
+        unit as well.  For example, for a given unit ``m``, will
+        generate ``mm``, ``cm``, ``km``, etc.  When a list, it is a list of
         prefix definitions of the form:
 
             (short_names, long_tables, factor)
@@ -2152,9 +2145,9 @@ def def_unit(s, represents=None, register=None, doc=None,
 
     exclude_prefixes : list of str, optional
         If any of the SI prefixes need to be excluded, they may be
-        listed here.  For example, `Pa` can be interpreted either as
+        listed here.  For example, ``Pa`` can be interpreted either as
         "petaannum" or "Pascal".  Therefore, when defining the
-        prefixes for `a`, `exclude_prefixes` should be set to
+        prefixes for ``a``, ``exclude_prefixes`` should be set to
         ``["P"]``.
 
     namespace : dict, optional
@@ -2224,3 +2217,5 @@ def _condition_arg(value):
 
 
 dimensionless_unscaled = CompositeUnit(1, [], [], _error_check=False)
+# Abbreviation of the above, see #1980
+one = dimensionless_unscaled

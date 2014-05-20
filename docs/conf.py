@@ -26,7 +26,7 @@
 # be accessible, and the documentation will not build correctly.
 
 # Load all of the global Astropy configuration
-from astropy.sphinx.conf import *
+from astropy_helpers.sphinx.conf import *
 
 import astropy
 
@@ -36,10 +36,10 @@ import astropy
 # If your documentation needs a minimal Sphinx version, state it here.
 #needs_sphinx = '1.1'
 
-# The intersphinx_mapping in astropy.sphinx.conf refers to astropy for
-# the benefit of affiliated packages who want to refer to objects in
-# the astropy core.  However, we don't want to cyclically reference
-# astropy in its own build so we remove it here.
+# The intersphinx_mapping in astropy_helpers.sphinx.conf refers to astropy for
+# the benefit of affiliated packages who want to refer to objects in the
+# astropy core.  However, we don't want to cyclically reference astropy in its
+# own build so we remove it here.
 del intersphinx_mapping['astropy']
 
 # List of patterns, relative to source directory, that match files and
@@ -68,7 +68,7 @@ rst_epilog += """
 
 project = u'Astropy'
 author = u'The Astropy Developers'
-copyright = u'2011-2013, ' + author
+copyright = u'2011-2014, ' + author
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -151,7 +151,7 @@ man_pages = [('index', project.lower(), project + u' Documentation',
 
 # -- Options for the edit_on_github extension ----------------------------------------
 
-extensions += ['astropy.sphinx.ext.edit_on_github']
+extensions += ['astropy_helpers.sphinx.ext.edit_on_github']
 
 # Don't import the module as "version" or it will override the
 # "version" configuration parameter
@@ -164,3 +164,5 @@ else:
     edit_on_github_branch = "master"
 edit_on_github_source_root = ""
 edit_on_github_doc_root = "docs"
+
+github_issues_url = 'https://github.com/astropy/astropy/issues/'

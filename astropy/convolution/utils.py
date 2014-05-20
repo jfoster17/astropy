@@ -1,9 +1,10 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from __future__ import division
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
 
 import numpy as np
 
-from ..modeling.core import Parametric1DModel, Parametric2DModel
+from ..modeling.core import Fittable1DModel, Fittable2DModel
 
 
 __all__ = ['discretize_model']
@@ -77,8 +78,8 @@ def discretize_model(model, x_range, y_range=None, mode='center', factor=10):
 
     Parameters
     ----------
-    model : :class:`~astropy.modeling.core.ParametricModel` instance
-        Instance of a :class:`~astropy.modeling.core.ParametricModel` to be evaluated.
+    model : `~astropy.modeling.FittableModel`
+        Model to be evaluated.
     x_range : tuple
         x range in which the model is evaluated.
     y_range : tuple, optional
@@ -97,15 +98,19 @@ def discretize_model(model, x_range, y_range=None, mode='center', factor=10):
                 Discretize model by taking the average
                 on an oversampled grid.
             * ``'integrate'``
-                Discretize model by integrating the model 
+                Discretize model by integrating the model
                 over the bin using `scipy.integrate.quad`.
                 Very slow.
     factor : float or int
         Factor of oversampling. Default = 10.
 
+    Returns
+    -------
+    array : `numpy.array`
+        Model value array
+
     Notes
     -----
-
     The ``oversample`` mode allows to conserve the integral on a subpixel
     scale. Here is the example of a normalized Gaussian1D:
 
@@ -130,27 +135,27 @@ def discretize_model(model, x_range, y_range=None, mode='center', factor=10):
 
 
     """
-    if isinstance(model, Parametric2DModel) and y_range is None:
+    if isinstance(model, Fittable2DModel) and y_range is None:
         raise Exception("Please specify y range.")
     if mode == "center":
-        if isinstance(model, Parametric1DModel):
+        if isinstance(model, Fittable1DModel):
             return discretize_center_1D(model, x_range)
-        if isinstance(model, Parametric2DModel):
+        if isinstance(model, Fittable2DModel):
             return discretize_center_2D(model, x_range, y_range)
     elif mode == "linear_interp":
-        if isinstance(model, Parametric1DModel):
+        if isinstance(model, Fittable1DModel):
             return discretize_linear_1D(model, x_range)
-        if isinstance(model, Parametric2DModel):
+        if isinstance(model, Fittable2DModel):
             return discretize_bilinear_2D(model, x_range, y_range)
     elif mode == "oversample":
-        if isinstance(model, Parametric1DModel):
+        if isinstance(model, Fittable1DModel):
             return discretize_oversample_1D(model, x_range, factor)
-        if isinstance(model, Parametric2DModel):
+        if isinstance(model, Fittable2DModel):
             return discretize_oversample_2D(model, x_range, y_range, factor)
     elif mode == "integrate":
-        if isinstance(model, Parametric1DModel):
+        if isinstance(model, Fittable1DModel):
             return discretize_integrate_1D(model, x_range)
-        if isinstance(model, Parametric2DModel):
+        if isinstance(model, Fittable2DModel):
             return discretize_integrate_2D(model, x_range, y_range)
     else:
         raise DiscretizationError('Invalid mode.')
@@ -214,7 +219,7 @@ def discretize_oversample_1D(model, x_range, factor=10):
     values = model(x)
 
     # Reshape and compute mean
-    values = np.reshape(values, (x.size / factor, factor))
+    values = np.reshape(values, (x.size // factor, factor))
     return values.mean(axis=1)[:-1]
 
 
@@ -232,7 +237,7 @@ def discretize_oversample_2D(model, x_range, y_range, factor=10):
     values = model(x_grid, y_grid)
 
     # Reshape and compute mean
-    shape = (y.size / factor, factor, x.size / factor, factor)
+    shape = (y.size // factor, factor, x.size // factor, factor)
     values = np.reshape(values, shape)
     return values.mean(axis=3).mean(axis=1)[:-1, :-1]
 

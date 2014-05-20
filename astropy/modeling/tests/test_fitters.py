@@ -2,7 +2,10 @@
 """
 Module to test fitting routines
 """
-from __future__ import division
+
+from __future__ import (absolute_import, unicode_literals, division,
+                        print_function)
+
 import os.path
 from .. import models
 from .. import fitting
@@ -28,7 +31,7 @@ class TestPolynomial2D(object):
     """
     def setup_class(self):
         self.model = models.Polynomial2D(2)
-        self.x, self.y = np.mgrid[:5, :5]
+        self.y, self.x = np.mgrid[:5, :5]
 
         def poly2(x, y):
             return 1 + 2 * x + 3 * x ** 2 + 4 * y + 5 * y ** 2 + 6 * x * y
@@ -36,7 +39,7 @@ class TestPolynomial2D(object):
         self.fitter = fitting.LinearLSQFitter()
 
     def test_poly2D_fitting(self):
-        v = self.model.deriv(x=self.x, y=self.y)
+        v = self.model.fit_deriv(x=self.x, y=self.y)
         p = linalg.lstsq(v, self.z.flatten())[0]
         new_model = self.fitter(self.model, self.x, self.y, self.z)
         utils.assert_allclose(new_model.parameters, p)
@@ -64,7 +67,7 @@ class TestICheb2D(object):
     """
     def setup_class(self):
         self.pmodel = models.Polynomial2D(2)
-        self.x, self.y = np.mgrid[:5, :5]
+        self.y, self.x = np.mgrid[:5, :5]
         self.z = self.pmodel(self.x, self.y)
         self.cheb2 = models.Chebyshev2D(2, 2)
         self.fitter = fitting.LinearLSQFitter()
@@ -225,3 +228,33 @@ class TestNonLinearFitters(object):
         # test, take np.abs()
         utils.assert_allclose(model.parameters, np.abs(slsqp_model.parameters),
                               rtol=10 ** (-4))
+
+    def test_param_cov(self):
+        """
+        Tests that the 'param_cov' fit_info entry gets the right answer for
+        *linear* least squares, where the answer is exact
+        """
+        rs = RandomState(1234567890)
+
+        a = 2
+        b = 100
+
+        x = np.linspace(0, 1, 100)
+        # y scatter is amplitude ~1 to make sure covarience is non-negligible
+        y = x*a + b + rs.randn(len(x))
+
+        #first compute the ordinary least squares covariance matrix
+        X = np.matrix(np.vstack([x, np.ones(len(x))]).T)
+        beta = np.linalg.inv(X.T * X) * X.T * np.matrix(y).T
+        s2 = np.sum((y - (X * beta).A.ravel())**2) / (len(y) - len(beta))
+        olscov = np.linalg.inv(X.T * X) * s2
+
+        #now do the non-linear least squares fit
+        mod = models.Linear1D(a, b)
+        fitter = fitting.NonLinearLSQFitter()
+
+        fmod = fitter(mod, x, y)
+
+        utils.assert_allclose(fmod.parameters, beta.A.ravel())
+        utils.assert_allclose(olscov, fitter.fit_info['param_cov'])
+

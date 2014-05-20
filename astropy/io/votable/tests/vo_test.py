@@ -1,3 +1,7 @@
+# -*- coding: utf-8 -*-
+
+# TEST_UNICODE_LITERALS
+
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """
 This is a set of regression tests for vo.
@@ -323,16 +327,16 @@ class TestParse:
         assert issubclass(self.array['unicode_test'].dtype.type,
                           np.object_)
         assert_array_equal(self.array['unicode_test'],
-                           ["Ce\xe7i n'est pas un pipe",
-                            '\u0bb5\u0ba3\u0b95\u0bcd\u0b95\u0bae\u0bcd',
+                           ["Ceçi n'est pas un pipe",
+                            'வணக்கம்',
                             'XXXX', '', ''])
 
     def test_fixed_unicode_test(self):
         assert issubclass(self.array['fixed_unicode_test'].dtype.type,
                           np.unicode_)
         assert_array_equal(self.array['fixed_unicode_test'],
-                           ["Ce\xe7i n'est",
-                            '\u0bb5\u0ba3\u0b95\u0bcd\u0b95\u0bae\u0bcd',
+                           ["Ceçi n'est",
+                            'வணக்கம்',
                             '0123456789', '', ''])
 
     def test_unsignedByte(self):
@@ -775,8 +779,9 @@ def test_validate():
 
     # We can't test xmllint, because we can't rely on it being on the
     # user's machine.
-    result = validate(get_pkg_data_filename('data/regression.xml'),
-                      output, xmllint=False)
+    with catch_warnings():
+        result = validate(get_pkg_data_filename('data/regression.xml'),
+                          output, xmllint=False)
 
     assert result == False
 
@@ -873,9 +878,9 @@ def test_fileobj():
         if sys.platform == 'win32':
             fd()
         else:
-            if sys.version_info[0] >= 3:
+            if six.PY3:
                 assert isinstance(fd, io.FileIO)
-            else:
+            elif six.PY2:
                 assert isinstance(fd, file)
 
 
@@ -948,10 +953,11 @@ def test_resource_structure():
 def test_no_resource_check():
     output = io.StringIO()
 
-    # We can't test xmllint, because we can't rely on it being on the
-    # user's machine.
-    result = validate(get_pkg_data_filename('data/no_resource.xml'),
-                      output, xmllint=False)
+    with catch_warnings():
+        # We can't test xmllint, because we can't rely on it being on the
+        # user's machine.
+        result = validate(get_pkg_data_filename('data/no_resource.xml'),
+                          output, xmllint=False)
 
     assert result == False
 
@@ -980,3 +986,9 @@ def test_no_resource_check():
                 replace('\\n', '\n'))
 
     assert truth == output
+
+
+def test_instantiate_vowarning():
+    # This used to raise a deprecation exception on Python 2.6.
+    # See https://github.com/astropy/astroquery/pull/276
+    VOWarning(())

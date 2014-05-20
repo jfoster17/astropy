@@ -1,24 +1,24 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
 from ....tests.helper import pytest
-from ... import ascii as asciitable
+from ... import ascii
 from .common import (assert_equal, assert_almost_equal, has_isnan,
                      setup_function, teardown_function)
 
 
 def read_table1(readme, data):
-    reader = asciitable.Cds(readme)
+    reader = ascii.Cds(readme)
     return reader.read(data)
 
 
 def read_table2(readme, data):
-    reader = asciitable.get_reader(Reader=asciitable.Cds, readme=readme)
-    reader.outputter = asciitable.TableOutputter()
+    reader = ascii.get_reader(Reader=ascii.Cds, readme=readme)
+    reader.outputter = ascii.TableOutputter()
     return reader.read(data)
 
 
 def read_table3(readme, data):
-    return asciitable.read(data, readme=readme)
+    return ascii.read(data, readme=readme)
 
 
 def test_multi_header():
@@ -29,6 +29,12 @@ def test_multi_header():
         assert_equal(len(table), 18)
         assert_almost_equal(table['Lambda'][-1], 6479.32)
         assert_equal(table['Fnu'][-1], '0.285937')
+    data = 't/cds/multi/lp944-20.dat'
+    for read_table in (read_table1, read_table2, read_table3):
+        table = read_table(readme, data)
+        assert_equal(len(table), 18)
+        assert_almost_equal(table['Lambda'][0], 0.342236)
+        assert_equal(table['Fnu'][-1], '0.489005')
 
 
 def test_glob_header():
@@ -42,7 +48,7 @@ def test_glob_header():
 
 
 def test_header_from_readme():
-    r = asciitable.Cds("t/vizier/ReadMe")
+    r = ascii.Cds("t/vizier/ReadMe")
     table = r.read("t/vizier/table1.dat")
     assert len(r.data.data_lines) == 15
     assert len(table) == 15

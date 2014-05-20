@@ -58,7 +58,8 @@ def test_sigma_clip():
         assert filtered_data.data[0] == randvar[0]
 
         # test axis
-        data = np.arange(5)+np.random.normal(0., 0.05, (5, 5))+np.diag(np.ones(5))
+        data = np.arange(5) + np.random.normal(0., 0.05, (5, 5)) + \
+            np.diag(np.ones(5))
         filtered_data = funcs.sigma_clip(data, axis=0, sig=2.3)
         assert filtered_data.count() == 20
         filtered_data = funcs.sigma_clip(data, axis=1, sig=2.3)
@@ -80,6 +81,27 @@ def test_median_absolute_deviation():
         mad = funcs.median_absolute_deviation(randvar, axis=1)
         assert len(mad) == 10
         assert mad.size < randvar.size
+        mad = funcs.median_absolute_deviation(randvar, axis=0)
+        assert len(mad) == 1000
+        assert mad.size < randvar.size
+        # Test some actual values in a 3 dimensional array
+        x = np.arange(3*4*5)
+        a = np.array([sum(x[:i+1]) for i in range(len(x))]).reshape(3, 4, 5)
+        mad = funcs.median_absolute_deviation(a)
+        assert mad == 389.5
+        mad = funcs.median_absolute_deviation(a, axis=0)
+        assert_allclose(mad, [[ 210.,  230.,  250.,  270.,  290.],
+                              [ 310.,  330.,  350.,  370.,  390.],
+                              [ 410.,  430.,  450.,  470.,  490.],
+                              [ 510.,  530.,  550.,  570.,  590.]])
+        mad = funcs.median_absolute_deviation(a, axis=1)
+        assert_allclose(mad, [[ 27.5,   32.5,   37.5,   42.5,   47.5],
+                              [ 127.5,  132.5,  137.5,  142.5,  147.5],
+                              [ 227.5,  232.5,  237.5,  242.5,  247.5]])
+        mad = funcs.median_absolute_deviation(a, axis=2)
+        assert_allclose(mad, [[  3.,   8.,  13.,  18.],
+                              [ 23.,  28.,  33.,  38.],
+                              [ 43.,  48.,  53.,  58.]])
 
 
 def test_biweight_location():
@@ -158,6 +180,24 @@ def test_binom_conf_interval():
                       [0.292, 0.501, 0.648, 0.766, 0.861]])
     assert_allclose(result, table, atol=1.e-3, rtol=0.)
 
+    # Test scalar version
+    result = np.array([funcs.binom_conf_interval(kval, n, conf=conf,
+                                                 interval='jeffreys')
+                       for kval in k]).transpose()
+    assert_allclose(result, table, atol=1.e-3, rtol=0.)
+
+    # Test flat
+    result = funcs.binom_conf_interval(k, n, conf=conf, interval='flat')
+    table = np.array([[0., 0.03185, 0.08523, 0.15701, 0.24486],
+                      [0.36941, 0.52650, 0.65085, 0.75513, 0.84298]])
+    assert_allclose(result, table, atol=1.e-3, rtol=0.)
+
+    # Test scalar version
+    result = np.array([funcs.binom_conf_interval(kval, n, conf=conf,
+                                                 interval='flat')
+                       for kval in k]).transpose()
+    assert_allclose(result, table, atol=1.e-3, rtol=0.)    
+
     # Test Wald interval
     result = funcs.binom_conf_interval(0, 5, interval='wald')
     assert_allclose(result, 0.)  # conf interval is [0, 0] when k = 0
@@ -168,6 +208,32 @@ def test_binom_conf_interval():
     assert_allclose(result[0], 0.5 - 0.5 / np.sqrt(1000.))
     assert_allclose(result[1], 0.5 + 0.5 / np.sqrt(1000.))
 
+    # Test shapes
+    k = 3
+    n = 7
+    for interval in ['wald', 'wilson', 'jeffreys', 'flat']:
+        result = funcs.binom_conf_interval(k, n, interval=interval)
+        assert result.shape == (2,)
+
+    k = np.array(k)
+    for interval in ['wald', 'wilson', 'jeffreys', 'flat']:
+        result = funcs.binom_conf_interval(k, n, interval=interval)
+        assert result.shape == (2,)
+
+    n = np.array(n)
+    for interval in ['wald', 'wilson', 'jeffreys', 'flat']:
+        result = funcs.binom_conf_interval(k, n, interval=interval)
+        assert result.shape == (2,)
+        
+    k = np.array([1, 3, 5])
+    for interval in ['wald', 'wilson', 'jeffreys', 'flat']:
+        result = funcs.binom_conf_interval(k, n, interval=interval)
+        assert result.shape == (2, 3)
+
+    n = np.array([5, 5, 5])
+    for interval in ['wald', 'wilson', 'jeffreys', 'flat']:
+        result = funcs.binom_conf_interval(k, n, interval=interval)
+        assert result.shape == (2, 3)
 
 @pytest.mark.skipif('not HAS_SCIPY')
 def test_binned_binom_proportion():
@@ -218,13 +284,14 @@ def test_signal_to_noise_oir_ccd():
 
 
 def test_bootstrap():
-    bootarr = np.array([1,2,3,4,5,6,7,8,9,0])
+    bootarr = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 0])
     #test general bootstrapping
-    answer = np.array([[7,4,8,5,7,0,3,7,8,5],[4,8,8,3,6,5,2,8,6,2]])
+    answer = np.array([[7, 4, 8, 5, 7, 0, 3, 7, 8, 5],
+                       [4, 8, 8, 3, 6, 5, 2, 8, 6, 2]])
     with NumpyRNGContext(42):
-        assert_equal(answer,funcs.bootstrap(bootarr,2))
+        assert_equal(answer, funcs.bootstrap(bootarr, 2))
 
     #test with a bootfunction
     with NumpyRNGContext(42):
-        bootresult = np.mean(funcs.bootstrap(bootarr,10000,bootfunc=np.mean))
-        assert_allclose(np.mean(bootarr),bootresult,atol=0.01)
+        bootresult = np.mean(funcs.bootstrap(bootarr, 10000, bootfunc=np.mean))
+        assert_allclose(np.mean(bootarr), bootresult, atol=0.01)

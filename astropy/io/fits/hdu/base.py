@@ -10,7 +10,7 @@ import warnings
 
 import numpy as np
 
-from .. import EXTENSION_NAME_CASE_SENSITIVE
+from .. import conf
 from ..card import Card
 from ..file import _File
 from ..header import Header, HEADER_END_RE, _pad_length
@@ -19,7 +19,9 @@ from ..util import (_is_int, _is_pseudo_unsigned, _unsigned_zero,
                     _get_array_mmap, _array_to_file)
 from ..verify import _Verify, _ErrList
 
+from ....extern.six import string_types, next
 from ....utils import lazyproperty, deprecated
+from ....utils.compat import ignored
 from ....utils.exceptions import AstropyUserWarning
 
 
@@ -59,8 +61,9 @@ def _hdu_class_from_header(cls, header):
             except Exception as e:
                 warnings.warn(
                     'An exception occurred matching an HDU header to the '
-                    'appropriate HDU type: %s' % unicode(e), AstropyUserWarning)
-                warnings.warn('The HDU will be treated as corrupted.', AstropyUserWarning)
+                    'appropriate HDU type: {0}'.format(e), AstropyUserWarning)
+                warnings.warn('The HDU will be treated as corrupted.',
+                              AstropyUserWarning)
                 klass = _CorruptedHDU
                 break
 
@@ -139,9 +142,9 @@ class _BaseHDU(object):
 
     @name.setter
     def name(self, value):
-        if not isinstance(value, basestring):
+        if not isinstance(value, string_types):
             raise TypeError("'name' attribute must be a string")
-        if not EXTENSION_NAME_CASE_SENSITIVE():
+        if not conf.extension_name_case_sensitive:
             value = value.upper()
         if 'EXTNAME' in self._header:
             self._header['EXTNAME'] = value
@@ -192,7 +195,7 @@ class _BaseHDU(object):
         return self._data_loaded and self.data is not None
 
     @property
-    @deprecated('3.2', alternative='the `._header_offset` attribute',
+    @deprecated('0.3', alternative='the `._header_offset` attribute',
                 pending=True)
     def _hdrLoc(self):
         """The byte offset of this HDU's header in the file it came from;
@@ -202,13 +205,13 @@ class _BaseHDU(object):
         return self._header_offset
 
     @_hdrLoc.setter
-    @deprecated('3.2', alternative='the `._header_offset` attribute',
+    @deprecated('0.3', alternative='the `._header_offset` attribute',
                 pending=True)
     def _hdrLoc(self, value):
         self._header_offset = value
 
     @property
-    @deprecated('3.2', alternative='the `._data_offset` attribute',
+    @deprecated('0.3', alternative='the `._data_offset` attribute',
                 pending=True)
     def _datLoc(self):
         """The byte offset of this HDU's data portion in the file it came from;
@@ -218,13 +221,13 @@ class _BaseHDU(object):
         return self._data_offset
 
     @_datLoc.setter
-    @deprecated('3.2', alternative='the `._data_offset` attribute',
+    @deprecated('0.3', alternative='the `._data_offset` attribute',
                 pending=True)
     def _datLoc(self, value):
         self._data_offset = value
 
     @property
-    @deprecated('3.2', alternative='the `._data_size` attribute',
+    @deprecated('0.3', alternative='the `._data_size` attribute',
                 pending=True)
     def _datSpan(self):
         """The byte size of this HDU's data portion in the file it came from;
@@ -234,13 +237,13 @@ class _BaseHDU(object):
         return self._data_size
 
     @_datSpan.setter
-    @deprecated('3.2', alternative='the `._data_size` attribute',
+    @deprecated('0.3', alternative='the `._data_size` attribute',
                 pending=True)
     def _datSpan(self, value):
         self._data_size = value
 
     @property
-    @deprecated('3.2', alternative='the `._header_offset` attribute',
+    @deprecated('0.3', alternative='the `._header_offset` attribute',
                 pending=True)
     def _hdrLoc(self):
         """The byte offset of this HDU's header in the file it came from;
@@ -250,13 +253,13 @@ class _BaseHDU(object):
         return self._header_offset
 
     @_hdrLoc.setter
-    @deprecated('3.2', alternative='the `._header_offset` attribute',
+    @deprecated('0.3', alternative='the `._header_offset` attribute',
                 pending=True)
     def _hdrLoc(self, value):
         self._header_offset = value
 
     @property
-    @deprecated('3.2', alternative='the `._data_offset` attribute',
+    @deprecated('0.3', alternative='the `._data_offset` attribute',
                 pending=True)
     def _datLoc(self):
         """The byte offset of this HDU's data portion in the file it came from;
@@ -266,13 +269,13 @@ class _BaseHDU(object):
         return self._data_offset
 
     @_datLoc.setter
-    @deprecated('3.2', alternative='the `._data_offset` attribute',
+    @deprecated('0.3', alternative='the `._data_offset` attribute',
                 pending=True)
     def _datLoc(self, value):
         self._data_offset = value
 
     @property
-    @deprecated('3.2', alternative='the `._data_size` attribute',
+    @deprecated('0.3', alternative='the `._data_size` attribute',
                 pending=True)
     def _datSpan(self):
         """The byte size of this HDU's data portion in the file it came from;
@@ -282,7 +285,7 @@ class _BaseHDU(object):
         return self._data_size
 
     @_datSpan.setter
-    @deprecated('3.2', alternative='the `._data_size` attribute',
+    @deprecated('0.3', alternative='the `._data_size` attribute',
                 pending=True)
     def _datSpan(self, value):
         self._data_size = value
@@ -319,34 +322,36 @@ class _BaseHDU(object):
         ----------
         data : str, bytearray, memoryview, ndarray
            A byte string contining the HDU's header and, optionally, its data.
-           If `fileobj` is not specified, and the length of `data` extends
+           If ``fileobj`` is not specified, and the length of ``data`` extends
            beyond the header, then the trailing data is taken to be the HDU's
-           data.  If `fileobj` is specified then the trailing data is ignored.
+           data.  If ``fileobj`` is specified then the trailing data is
+           ignored.
 
-        fileobj : file (optional)
+        fileobj : file, optional
            The file-like object that this HDU was read from.
 
-        offset : int (optional)
-           If `fileobj` is specified, the offset into the file-like object at
+        offset : int, optional
+           If ``fileobj`` is specified, the offset into the file-like object at
            which this HDU begins.
 
-        checksum : bool (optional)
+        checksum : bool, optional
            Check the HDU's checksum and/or datasum.
 
-        ignore_missing_end : bool (optional)
+        ignore_missing_end : bool, optional
            Ignore a missing end card in the header data.  Note that without
            the end card the end of the header can't be found, so the entire
            data is just assumed to be the header.
 
-        kwargs : (optional)
+        kwargs : optional
            May contain additional keyword arguments specific to an HDU type.
            Any unrecognized kwargs are simply ignored.
         """
 
         if isinstance(data, Header):
             header = data
+            first_key = next(iter(header))
             if (not len(header) or
-                    header.keys()[0] not in ('SIMPLE', 'XTENSION')):
+                    first_key not in ('SIMPLE', 'XTENSION')):
                 raise ValueError('Block does not begin with SIMPLE or '
                                  'XTENSION')
         else:
@@ -424,8 +429,8 @@ class _BaseHDU(object):
                  **kwargs):
         """
         Read the HDU from a file.  Normally an HDU should be opened with
-        `fitsopen()` which reads the entire HDU list in a FITS file.  But this
-        method is still provided for symmetry with `writeto()`.
+        :func:`open` which reads the entire HDU list in a FITS file.  But this
+        method is still provided for symmetry with :func:`writeto`.
 
         Parameters
         ----------
@@ -434,13 +439,13 @@ class _BaseHDU(object):
             beginning of the HDU.
 
         checksum : bool
-            If `True`, verifies that both ``DATASUM`` and
-            ``CHECKSUM`` card values (when present in the HDU header)
-            match the header and data of all HDU's in the file.
+            If `True`, verifies that both ``DATASUM`` and ``CHECKSUM`` card
+            values (when present in the HDU header) match the header and data
+            of all HDU's in the file.
 
         ignore_missing_end : bool
-            Do not issue an exception when opening a file that is
-            missing an ``END`` card in the last header.
+            Do not issue an exception when opening a file that is missing an
+            ``END`` card in the last header.
         """
 
         # TODO: Figure out a way to make it possible for the _File
@@ -511,6 +516,8 @@ class _BaseHDU(object):
 
     # TODO: Rework checksum handling so that it's not necessary to add a
     # checksum argument here
+    # TODO: The BaseHDU class shouldn't even handle checksums since they're
+    # only implemented on _ValidHDU...
     def _prewriteto(self, checksum=False, inplace=False):
         self._update_uint_scale_keywords()
 
@@ -551,7 +558,9 @@ class _BaseHDU(object):
 
             if datasum_keyword in self._header:
                 del self._header[datasum_keyword]
-        elif modified or self._new:
+        elif (modified or self._new or
+                (checksum and ('CHECKSUM' not in self._header or
+                               'DATASUM' not in self._header))):
             if checksum == 'datasum':
                 self.add_datasum(datasum_keyword=datasum_keyword)
             elif checksum == 'nonstandard_datasum':
@@ -578,18 +587,14 @@ class _BaseHDU(object):
         if (self._has_data and self._standard and
                 _is_pseudo_unsigned(self.data.dtype)):
             for keyword in ('BSCALE', 'BZERO'):
-                try:
+                with ignored(KeyError):
                     del self._header[keyword]
-                except KeyError:
-                    pass
 
     def _writeheader(self, fileobj):
         offset = 0
         if not fileobj.simulateonly:
-            try:
+            with ignored(AttributeError, IOError):
                 offset = fileobj.tell()
-            except (AttributeError, IOError):
-                pass
 
             self._header.tofile(fileobj)
 
@@ -840,7 +845,7 @@ class _NonstandardHDU(_BaseHDU, _Verify):
 
     def _writedata(self, fileobj):
         """
-        Differs from the base class `_writedata()` in that it doesn't
+        Differs from the base class :class:`_writedata` in that it doesn't
         automatically add padding, and treats the data as a string of raw bytes
         instead of an array.
         """
@@ -907,7 +912,8 @@ class _ValidHDU(_BaseHDU, _Verify):
         case?  Not sure...
         """
 
-        return header.keys()[0] not in ('SIMPLE', 'XTENSION')
+        first_key = next(iter(header))
+        return first_key not in ('SIMPLE', 'XTENSION')
 
     @property
     def size(self):
@@ -931,14 +937,6 @@ class _ValidHDU(_BaseHDU, _Verify):
         """
         Calculates and returns the number of bytes that this HDU will write to
         a file.
-
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        Number of bytes
         """
 
         f = _File()
@@ -952,13 +950,9 @@ class _ValidHDU(_BaseHDU, _Verify):
         valid after a read or write of the associated file with no
         intervening changes to the `HDUList`.
 
-        Parameters
-        ----------
-        None
-
         Returns
         -------
-        dictionary or None
+        dict or None
 
            The dictionary details information about the locations of
            this HDU within an associated file.  Returns `None` when
@@ -996,7 +990,7 @@ class _ValidHDU(_BaseHDU, _Verify):
             data = None
         return self.__class__(data=data, header=self._header.copy())
 
-    @deprecated('3.2', alternative='the ``.name`` attribute or `Header.set`',
+    @deprecated('0.3', alternative='the ``.name`` attribute or `Header.set`',
                 pending=True)
     def update_ext_name(self, value, comment=None, before=None,
                         after=None, savecomment=False):
@@ -1006,30 +1000,30 @@ class _ValidHDU(_BaseHDU, _Verify):
         If the keyword already exists in the Header, it's value and/or comment
         will be updated.  If it does not exist, a new card will be created
         and it will be placed before or after the specified location.
-        If no `before` or `after` is specified, it will be appended at
+        If no ``before`` or ``after`` is specified, it will be appended at
         the end.
 
         Parameters
         ----------
         value : str
-            value to be used for the new extension name
+            Value to be used for the new extension name
 
         comment : str, optional
-            to be used for updating, default=None.
+            To be used for updating, default=None.
 
         before : str or int, optional
-            name of the keyword, or index of the `Card` before which
-            the new card will be placed in the Header.  The argument
-            `before` takes precedence over `after` if both specified.
+            Name of the keyword, or index of the `Card` before which the new
+            card will be placed in the Header.  The argument ``before`` takes
+            precedence over ``after`` if both are specified.
 
         after : str or int, optional
-            name of the keyword, or index of the `Card` after which
-            the new card will be placed in the Header.
+            Name of the keyword, or index of the `Card` after which
+            the new card will be placed in the Header
 
         savecomment : bool, optional
             When `True`, preserve the current comment for an existing
-            keyword.  The argument `savecomment` takes precedence over
-            `comment` if both specified.  If `comment` is not
+            keyword.  The argument ``savecomment`` takes precedence over
+            ``comment`` if both specified.  If ``comment`` is not
             specified then the current comment will automatically be
             preserved.
         """
@@ -1042,10 +1036,10 @@ class _ValidHDU(_BaseHDU, _Verify):
         # handles anyone who might use the before/after keywords to set the
         # position of the EXTNAME keyword.  Setting self.name = name does some
         # additional processing on the value such as handling
-        # EXTENSION_NAME_CASE_SENSITIVE
+        # conf.extension_name_case_sensitive
         self.name = value
 
-    @deprecated('3.2', alternative='the `.ver` attribute or `Header.set`',
+    @deprecated('0.3', alternative='the ``.ver`` attribute or `Header.set`',
                 pending=True)
     def update_ext_version(self, value, comment=None, before=None,
                            after=None, savecomment=False):
@@ -1055,30 +1049,30 @@ class _ValidHDU(_BaseHDU, _Verify):
         If the keyword already exists in the Header, it's value and/or comment
         will be updated.  If it does not exist, a new card will be created
         and it will be placed before or after the specified location.
-        If no `before` or `after` is specified, it will be appended at
+        If no ``before`` or ``after`` is specified, it will be appended at
         the end.
 
         Parameters
         ----------
         value : str
-            value to be used for the new extension version
+            Value to be used for the new extension version
 
         comment : str, optional
-            to be used for updating, default=None.
+            To be used for updating; default=None.
 
         before : str or int, optional
-            name of the keyword, or index of the `Card` before which
-            the new card will be placed in the Header.  The argument
-            `before` takes precedence over `after` if both specified.
+            Name of the keyword, or index of the `Card` before which the new
+            card will be placed in the Header.  The argument ``before`` takes
+            precedence over ``after`` if both are specified.
 
         after : str or int, optional
-            name of the keyword, or index of the `Card` after which
+            Name of the keyword, or index of the `Card` after which
             the new card will be placed in the Header.
 
         savecomment : bool, optional
             When `True`, preserve the current comment for an existing
-            keyword.  The argument `savecomment` takes precedence over
-            `comment` if both specified.  If `comment` is not
+            keyword.  The argument ``savecomment`` takes precedence over
+            ``comment`` if both specified.  If ``comment`` is not
             specified then the current comment will automatically be
             preserved.
         """
@@ -1137,7 +1131,7 @@ class _ValidHDU(_BaseHDU, _Verify):
 
         # Verify that the EXTNAME keyword exists and is a string
         if 'EXTNAME' in self._header:
-            if not isinstance(self._header['EXTNAME'], basestring):
+            if not isinstance(self._header['EXTNAME'], string_types):
                 err_text = 'The EXTNAME keyword must have a string value.'
                 fix_text = 'Converted the EXTNAME keyword to a string value.'
 
@@ -1159,11 +1153,49 @@ class _ValidHDU(_BaseHDU, _Verify):
         """
         Check the existence, location, and value of a required `Card`.
 
-        TODO: Write about parameters
+        Parameters
+        ----------
+        keyword : str
+            The keyword to validate
 
-        If `pos` = `None`, it can be anywhere.  If the card does not exist,
-        the new card will have the `fix_value` as its value when created.
-        Also check the card's value by using the `test` argument.
+        pos : int, callable
+            If an ``int``, this specifies the exact location this card should
+            have in the header.  Remember that Python is zero-indexed, so this
+            means ``pos=0`` requires the card to be the first card in the
+            header.  If given a callable, it should take one argument--the
+            actual position of the keyword--and return `True` or `False`.  This
+            can be used for custom evaluation.  For example if
+            ``pos=lambda idx: idx > 10`` this will check that the keyword's
+            index is greater than 10.
+
+        test : callable
+            This should be a callable (generally a function) that is passed the
+            value of the given keyword and returns `True` or `False`.  This can
+            be used to validate the value associated with the given keyword.
+
+        fix_value : str, int, float, complex, bool, None
+            A valid value for a FITS keyword to to use if the given ``test``
+            fails to replace an invalid value.  In other words, this provides
+            a default value to use as a replacement if the keyword's current
+            value is invalid.  If `None`, there is no replacement value and the
+            keyword is unfixable.
+
+        option : str
+            Output verification option.  Must be one of ``"fix"``,
+            ``"silentfix"``, ``"ignore"``, ``"warn"``, or
+            ``"exception"``.  See :ref:`verify` for more info.
+
+        errlist : list
+            A list of validation errors already found in the FITS file; this is
+            used primarily for the validation system to collect errors across
+            multiple HDUs and multiple calls to `req_cards`.
+
+        Notes
+        -----
+        If ``pos=None``, the card can be anywhere in the header.  If the card
+        does not exist, the new card will have the ``fix_value`` as its value
+        when created.  Also check the card's value by using the ``test``
+        argument.
         """
 
         errs = errlist
@@ -1261,10 +1293,9 @@ class _ValidHDU(_BaseHDU, _Verify):
 
         Notes
         -----
-        For testing purposes, provide a `when` argument to enable the
-        comment value in the card to remain consistent.  This will
-        enable the generation of a ``CHECKSUM`` card with a consistent
-        value.
+        For testing purposes, provide a ``when`` argument to enable the comment
+        value in the card to remain consistent.  This will enable the
+        generation of a ``CHECKSUM`` card with a consistent value.
         """
 
         cs = self._calculate_datasum(blocking)
@@ -1307,11 +1338,11 @@ class _ValidHDU(_BaseHDU, _Verify):
 
         Notes
         -----
-        For testing purposes, first call `add_datasum` with a `when`
-        argument, then call `add_checksum` with a `when` argument and
-        `override_datasum` set to `True`.  This will provide
-        consistent comments for both cards and enable the generation
-        of a ``CHECKSUM`` card with a consistent value.
+        For testing purposes, first call `add_datasum` with a ``when``
+        argument, then call `add_checksum` with a ``when`` argument and
+        ``override_datasum`` set to `True`.  This will provide consistent
+        comments for both cards and enable the generation of a ``CHECKSUM``
+        card with a consistent value.
         """
 
         if not override_datasum:
@@ -1414,9 +1445,9 @@ class _ValidHDU(_BaseHDU, _Verify):
             self._checksum = self._header['CHECKSUM']
             self._checksum_comment = self._header.comments['CHECKSUM']
             if not self.verify_checksum(blocking):
-                warnings.warn('Checksum verification failed for HDU %s.\n' %
-                              ((self.name, self.ver),), AstropyUserWarning)
-            del self._header['CHECKSUM']
+                warnings.warn(
+                    'Checksum verification failed for HDU {0}.\n'.format(
+                        (self.name, self.ver)), AstropyUserWarning)
         else:
             self._checksum = None
             self._checksum_comment = None
@@ -1426,9 +1457,9 @@ class _ValidHDU(_BaseHDU, _Verify):
             self._datasum_comment = self._header.comments['DATASUM']
 
             if not self.verify_datasum(blocking):
-                warnings.warn('Datasum verification failed for HDU %s.\n' %
-                              ((self.name, self.ver),), AstropyUserWarning)
-            del self._header['DATASUM']
+                warnings.warn(
+                    'Datasum verification failed for HDU {0}.\n'.format(
+                        (self.name, self.ver)), AstropyUserWarning)
         else:
             self._checksum = None
             self._checksum_comment = None
@@ -1605,7 +1636,7 @@ class _ValidHDU(_BaseHDU, _Verify):
 
     def _char_encode(self, value):
         """
-        Encodes the checksum `value` using the algorithm described
+        Encodes the checksum ``value`` using the algorithm described
         in SPR section A.7.2 and returns it as a 16 character string.
 
         Parameters
@@ -1710,7 +1741,7 @@ class NonstandardExtHDU(ExtensionHDU):
 
         card = header.cards[0]
         xtension = card.value
-        if isinstance(xtension, basestring):
+        if isinstance(xtension, string_types):
             xtension = xtension.rstrip()
         # A3DTABLE is not really considered a 'standard' extension, as it was
         # sort of the prototype for BINTABLE; however, since our BINTABLE

@@ -1,5 +1,7 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
+# TEST_UNICODE_LITERALS
+
 from distutils import version
 import warnings
 
@@ -49,22 +51,19 @@ class TestJoin():
 
     def test_table_meta_merge_conflict(self):
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with catch_warnings() as w:
             out = table.join(self.t1, self.t3, join_type='inner')
         assert len(w) == 3
 
         assert out.meta == self.t3.meta
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with catch_warnings() as w:
             out = table.join(self.t1, self.t3, join_type='inner', metadata_conflicts='warn')
         assert len(w) == 3
 
         assert out.meta == self.t3.meta
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with catch_warnings() as w:
             out = table.join(self.t1, self.t3, join_type='inner', metadata_conflicts='silent')
         assert len(w) == 0
 
@@ -404,22 +403,19 @@ class TestVStack():
 
     def test_table_meta_merge_conflict(self):
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with catch_warnings() as w:
             out = table.vstack([self.t1, self.t5], join_type='inner')
         assert len(w) == 2
 
         assert out.meta == self.t5.meta
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with catch_warnings() as w:
             out = table.vstack([self.t1, self.t5], join_type='inner', metadata_conflicts='warn')
         assert len(w) == 2
 
         assert out.meta == self.t5.meta
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with catch_warnings() as w:
             out = table.vstack([self.t1, self.t5], join_type='inner', metadata_conflicts='silent')
         assert len(w) == 0
 
@@ -484,8 +480,13 @@ class TestVStack():
                                   '  1 bar']
 
     def test_stack_incompatible(self):
-        with pytest.raises(np_utils.TableMergeError):
+        with pytest.raises(np_utils.TableMergeError) as excinfo:
             table.vstack([self.t1, self.t3], join_type='inner')
+        assert "The 'b' columns have incompatible types:" in str(excinfo)
+
+        with pytest.raises(np_utils.TableMergeError) as excinfo:
+            table.vstack([self.t1, self.t3], join_type='outer')
+        assert "The 'b' columns have incompatible types:" in str(excinfo)
 
         with pytest.raises(np_utils.TableMergeError):
             table.vstack([self.t1, self.t2], join_type='exact')
@@ -600,22 +601,19 @@ class TestHStack():
 
     def test_table_meta_merge_conflict(self):
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with catch_warnings() as w:
             out = table.hstack([self.t1, self.t5], join_type='inner')
         assert len(w) == 2
 
         assert out.meta == self.t5.meta
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with catch_warnings() as w:
             out = table.hstack([self.t1, self.t5], join_type='inner', metadata_conflicts='warn')
         assert len(w) == 2
 
         assert out.meta == self.t5.meta
 
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        with catch_warnings() as w:
             out = table.hstack([self.t1, self.t5], join_type='inner', metadata_conflicts='silent')
         assert len(w) == 0
 
@@ -725,5 +723,3 @@ class TestHStack():
             # Make sure we got a copy of meta, not ref
             t1['b'].meta['b'] = None
             assert out['b'].meta['b'] == [1, 2]
-
-

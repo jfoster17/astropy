@@ -31,7 +31,8 @@ from ..extern.six.moves import urllib
 __all__ = ['find_current_module', 'isiterable', 'deprecated', 'lazyproperty',
            'deprecated_attribute', 'silence', 'format_exception',
            'NumpyRNGContext', 'find_api_page', 'is_path_hidden',
-           'walk_skip_hidden', 'JsonCustomEncoder', 'indent']
+           'walk_skip_hidden', 'JsonCustomEncoder', 'indent',
+           'InheritDocstrings']
 
 __doctest_skip__ = ['find_current_module']
 
@@ -39,9 +40,9 @@ __doctest_skip__ = ['find_current_module']
 def find_current_module(depth=1, finddiff=False):
     """ Determines the module/package from which this function is called.
 
-    This function has two modes, determined by the `finddiff` option. it
+    This function has two modes, determined by the ``finddiff`` option. it
     will either simply go the requested number of frames up the call
-    stack (if `finddiff` is False), or it will go up the call stack until
+    stack (if ``finddiff`` is False), or it will go up the call stack until
     it reaches a module that is *not* in a specified set.
 
     Parameters
@@ -50,13 +51,13 @@ def find_current_module(depth=1, finddiff=False):
         Specifies how far back to go in the call stack (0-indexed, so that
         passing in 0 gives back `astropy.utils.misc`).
     finddiff : bool or list
-        If False, the returned `mod` will just be `depth` frames up from
+        If False, the returned ``mod`` will just be ``depth`` frames up from
         the current frame. Otherwise, the function will start at a frame
-        `depth` up from current, and continue up the call stack to the
+        ``depth`` up from current, and continue up the call stack to the
         first module that is *different* from those in the provided list.
-        In this case, `finddiff` can be a list of modules or modules
+        In this case, ``finddiff`` can be a list of modules or modules
         names. Alternatively, it can be True, which will use the module
-        `depth` call stack frames up as the module the returned module
+        ``depth`` call stack frames up as the module the returned module
         most be different from.
 
     Returns
@@ -69,12 +70,12 @@ def find_current_module(depth=1, finddiff=False):
     Raises
     ------
     ValueError
-        If `finddiff` is a list with an invalid entry.
+        If ``finddiff`` is a list with an invalid entry.
 
     Examples
     --------
     The examples below assume that there are two modules in a package named
-    `pkg`. ``mod1.py``::
+    ``pkg``. ``mod1.py``::
 
         def find1():
             from astropy.utils import find_current_module
@@ -154,28 +155,30 @@ def find_mod_objs(modname, onlylocals=False):
 
     .. note::
         The returned list *not* include subpackages or modules of
-        `modname`,nor does it include private attributes (those that
+        ``modname``, nor does it include private attributes (those that
         beginwith '_' or are not in `__all__`).
 
     Parameters
     ----------
     modname : str
         The name of the module to search.
-    onlylocals : bool
-        If True, only attributes that are either members of `modname` OR one of
-        its modules or subpackages will be included.
+    onlylocals : bool or list of str
+        If `True`, only attributes that are either members of ``modname`` OR
+        one of its modules or subpackages will be included. If it is a list
+        of strings, those specify the possible packages that will be
+        considered "local".
 
     Returns
     -------
     localnames : list of str
         A list of the names of the attributes as they are named in the
-        module `modname` .
+        module ``modname`` .
     fqnames : list of str
         A list of the full qualified names of the attributes (e.g.,
         ``astropy.utils.misc.find_mod_objs``). For attributes that are
         simple variables, this is based on the local name, but for
         functions or classes it can be different if they are actually
-        defined elsewhere and just referenced in `modname`.
+        defined elsewhere and just referenced in ``modname``.
     objs : list of objects
         A list of the actual attributes themselves (in the same order as
         the other arguments)
@@ -204,7 +207,9 @@ def find_mod_objs(modname, onlylocals=False):
             fqnames.append(modname + '.' + lnm)
 
     if onlylocals:
-        valids = [fqn.startswith(modname) for fqn in fqnames]
+        if onlylocals is True:
+            onlylocals = [modname]
+        valids = [any([fqn.startswith(nm) for nm in onlylocals]) for fqn in fqnames]
         localnames = [e for i, e in enumerate(localnames) if valids[i]]
         fqnames = [e for i, e in enumerate(fqnames) if valids[i]]
         objs = [e for i, e in enumerate(objs) if valids[i]]
@@ -324,11 +329,10 @@ class lazyproperty(object):
         return cls_ns[property_name]
 
 
-# TODO: Provide a class deprecation marker as well.
 def deprecated(since, message='', name='', alternative='', pending=False,
-               obj_type='function'):
+               obj_type=None):
     """
-    Used to mark a function as deprecated.
+    Used to mark a function or class as deprecated.
 
     To mark an attribute as deprecated, use `deprecated_attribute`.
 
@@ -340,35 +344,57 @@ def deprecated(since, message='', name='', alternative='', pending=False,
 
     message : str, optional
         Override the default deprecation message.  The format
-        specifier `%(func)s` may be used for the name of the function,
-        and `%(alternative)s` may be used in the deprecation message
+        specifier ``func`` may be used for the name of the function,
+        and ``alternative`` may be used in the deprecation message
         to insert the name of an alternative to the deprecated
-        function.  `%(obj_type)` may be used to insert a friendly name
+        function. ``obj_type`` may be used to insert a friendly name
         for the type of object being deprecated.
 
     name : str, optional
-        The name of the deprecated function; if not provided the name
-        is automatically determined from the passed in function,
-        though this is useful in the case of renamed functions, where
-        the new function is just assigned to the name of the
-        deprecated function.  For example::
+        The name of the deprecated function or class; if not provided
+        the name is automatically determined from the passed in
+        function or class, though this is useful in the case of
+        renamed functions, where the new function is just assigned to
+        the name of the deprecated function.  For example::
 
             def new_function():
                 ...
             oldFunction = new_function
 
     alternative : str, optional
-        An alternative function that the user may use in place of the
-        deprecated function.  The deprecation warning will tell the user about
-        this alternative if provided.
+        An alternative function or class name that the user may use in
+        place of the deprecated object.  The deprecation warning will
+        tell the user about this alternative if provided.
 
     pending : bool, optional
         If True, uses a AstropyPendingDeprecationWarning instead of a
         AstropyDeprecationWarning.
-    """
 
-    def deprecate(func, message=message, name=name, alternative=alternative,
-                  pending=pending):
+    obj_type : str, optional
+        The type of this object, if the automatically determined one
+        needs to be overridden.
+    """
+    def deprecate_doc(old_doc, message):
+        """
+        Returns a given docstring with a deprecation message prepended
+        to it.
+        """
+        if not old_doc:
+            old_doc = ''
+        old_doc = textwrap.dedent(old_doc).strip('\n')
+        new_doc = (('\n.. deprecated:: %(since)s'
+                    '\n    %(message)s\n\n' %
+                    {'since': since, 'message': message.strip()}) + old_doc)
+        if not old_doc:
+            # This is to prevent a spurious 'unexected unindent' warning from
+            # docutils when the original docstring was blank.
+            new_doc += r'\ '
+        return new_doc
+
+    def get_function(func):
+        """
+        Given a function or classmethod, get the function object.
+        """
         if isinstance(func, classmethod):
             try:
                 func = func.__func__
@@ -384,12 +410,94 @@ def deprecated(since, message='', name='', alternative='', pending=False,
                     # Nothing we can do really...  just return the original
                     # classmethod
                     return func
-            is_classmethod = True
+        return func
+
+    def deprecate_function(func, message):
+        """
+        Returns a wrapped function that displays an
+        ``AstropyDeprecationWarning`` when it is called.
+        """
+        is_classmethod = isinstance(func, classmethod)
+        func = get_function(func)
+
+        def deprecated_func(*args, **kwargs):
+            if pending:
+                category = AstropyPendingDeprecationWarning
+            else:
+                category = AstropyDeprecationWarning
+
+            warnings.warn(message, category, stacklevel=2)
+
+            return func(*args, **kwargs)
+
+        # If this is an extension function, we can't call
+        # functools.wraps on it, but we normally don't care.
+        # This crazy way to get the type of a wrapper descriptor is
+        # straight out of the Python 3.3 inspect module docs.
+        if type(func) != type(str.__dict__['__add__']):
+            deprecated_func = functools.wraps(func)(deprecated_func)
+
+        deprecated_func.__doc__ = deprecate_doc(
+            deprecated_func.__doc__, message)
+
+        if is_classmethod:
+            return classmethod(deprecated_func)
+        return deprecated_func
+
+    def deprecate_class(cls, message):
+        """
+        Returns a wrapper class with the docstrings updated and an
+        __init__ function that will raise an
+        ``AstropyDeprectationWarning`` warning when called.
+        """
+        # Creates a new class with the same name and bases as the
+        # original class, but updates the dictionary with a new
+        # docstring and a wrapped __init__ method.  __module__ needs
+        # to be manually copied over, since otherwise it will be set
+        # to *this* module (astropy.utils.misc).
+
+        # This approach seems to make Sphinx happy (the new class
+        # looks enough like the original class), and works with
+        # extension classes (which functools.wraps does not, since
+        # it tries to modify the original class).
+
+        # We need to add a custom pickler or you'll get
+        #     Can't pickle <class ..>: it's not found as ...
+        # errors. Picklability is required for any class that is
+        # documented by Sphinx.
+
+        def __getstate__(self):
+            return super(cls, self).__getstate__()
+
+        def __setstate__(self, state):
+            return super(cls, self).__setstate__(state)
+
+        d = {
+            '__doc__': deprecate_doc(cls.__doc__, message),
+            '__init__': deprecate_function(cls.__init__, message),
+            '__module__': cls.__module__,
+            '__getstate__': __getstate__,
+            '__setstate__': __setstate__
+        }
+
+        return type(cls.__name__, (cls,), d)
+
+    def deprecate(obj, message=message, name=name, alternative=alternative,
+                  pending=pending):
+        if obj_type is None:
+            if isinstance(obj, type):
+                obj_type_name = 'class'
+            elif inspect.isfunction(obj):
+                obj_type_name = 'function'
+            elif inspect.ismethod(obj):
+                obj_type_name = 'method'
+            else:
+                obj_type_name = 'object'
         else:
-            is_classmethod = False
+            obj_type_name = obj_type
 
         if not name:
-            name = func.__name__
+            name = get_function(obj).__name__
 
         altmessage = ''
         if not message or type(message) == type(deprecate):
@@ -406,40 +514,16 @@ def deprecated(since, message='', name='', alternative='', pending=False,
             'func': name,
             'name': name,
             'alternative': alternative,
-            'obj_type': obj_type}) +
+            'obj_type': obj_type_name}) +
             altmessage)
 
-        @functools.wraps(func)
-        def deprecated_func(*args, **kwargs):
-            if pending:
-                category = AstropyPendingDeprecationWarning
-            else:
-                category = AstropyDeprecationWarning
-
-            warnings.warn(message, category, stacklevel=2)
-
-            return func(*args, **kwargs)
-
-        old_doc = deprecated_func.__doc__
-        if not old_doc:
-            old_doc = ''
-        old_doc = textwrap.dedent(old_doc).strip('\n')
-        altmessage = altmessage.strip()
         if not altmessage:
-            altmessage = message.strip()
-        new_doc = (('\n.. deprecated:: %(since)s'
-                    '\n    %(message)s\n\n' %
-                    {'since': since, 'message': altmessage.strip()}) + old_doc)
-        if not old_doc:
-            # This is to prevent a spurious 'unexected unindent' warning from
-            # docutils when the original docstring was blank.
-            new_doc += r'\ '
+            altmessage = message
 
-        deprecated_func.__doc__ = new_doc
-
-        if is_classmethod:
-            deprecated_func = classmethod(deprecated_func)
-        return deprecated_func
+        if isinstance(obj, type):
+            return deprecate_class(obj, altmessage)
+        else:
+            return deprecate_function(obj, altmessage)
 
     if type(message) == type(deprecate):
         return deprecate(message)
@@ -454,7 +538,7 @@ def deprecated_attribute(name, since, message=None, alternative=None,
     property that will warn when the given attribute name is accessed.
     To prevent the warning (i.e. for internal code), use the private
     name for the attribute by prepending an underscore
-    (i.e. `self._name`).
+    (i.e. ``self._name``).
 
     Parameters
     ----------
@@ -467,8 +551,8 @@ def deprecated_attribute(name, since, message=None, alternative=None,
 
     message : str, optional
         Override the default deprecation message.  The format
-        specifier `%(name)s` may be used for the name of the attribute,
-        and `%(alternative)s` may be used in the deprecation message
+        specifier ``name`` may be used for the name of the attribute,
+        and ``alternative`` may be used in the deprecation message
         to insert the name of an alternative to the deprecated
         function.
 
@@ -547,12 +631,12 @@ def format_exception(msg, *args, **kwargs):
     also used to format the message.
 
     .. note::
-        This uses `sys.exc_info` to gather up the information needed to
-        fill in the formatting arguments. Python 2.x and 3.x have slightly
-        different behavior regarding `sys.exc_info` (the latter will not carry
-        it outside a handled exception), so it's not wise to use this outside of
-        an `except` clause - if it is, this will substitute '<unkown>' for the 4
-        formatting arguments.
+        This uses `sys.exc_info` to gather up the information needed to fill
+        in the formatting arguments. Python 2.x and 3.x have slightly
+        different behavior regarding `sys.exc_info` (the latter will not
+        carry it outside a handled exception), so it's not wise to use this
+        outside of an ``except`` clause - if it is, this will substitute
+        '<unkown>' for the 4 formatting arguments.
     """
 
     tb = traceback.extract_tb(sys.exc_info()[2], limit=1)
@@ -617,9 +701,9 @@ def find_api_page(obj, version=None, openinbrowser=True, timeout=None):
     optionally open that page in a web browser.
 
     .. note::
-        You must be connected to the internet for this to function even
-        if `openinbrowser` is False, unless you provide a local version of
-        the documentation to `version` (e.g., ``file:///path/to/docs``).
+        You must be connected to the internet for this to function even if
+        ``openinbrowser`` is `False`, unless you provide a local version of
+        the documentation to ``version`` (e.g., ``file:///path/to/docs``).
 
     Parameters
     ----------
@@ -633,7 +717,7 @@ def find_api_page(obj, version=None, openinbrowser=True, timeout=None):
         latest if you are on aren't on a release, otherwise, the version you
         are on.
     openinbrowser : bool
-        If True, the `webbrowser` package will be used to open the doc
+        If `True`, the `webbrowser` package will be used to open the doc
         page in a new web browser window.
     timeout : number, optional
         The number of seconds to wait before timing-out the query to
@@ -783,7 +867,7 @@ def walk_skip_hidden(top, onerror=None, followlinks=False):
     """
     A wrapper for `os.walk` that skips hidden files and directories.
 
-    This function does not have the parameter `topdown` from
+    This function does not have the parameter ``topdown`` from
     `os.walk`: the directories must always be recursed top-down when
     using this function.
 
@@ -872,28 +956,34 @@ def did_you_mean(s, candidates, n=3, cutoff=0.8):
         Returns the string "Did you mean X, Y, or Z?", or the empty
         string if no alternatives were found.
     """
+    if isinstance(s, six.text_type):
+        s = strip_accents(s)
+    s_lower = s.lower()
+
+    # Create a mapping from the lower case name to all capitalization
+    # variants of that name.
+    candidates_lower = {}
+    for candidate in candidates:
+        candidate_lower = candidate.lower()
+        candidates_lower.setdefault(candidate_lower, [])
+        candidates_lower[candidate_lower].append(candidate)
+
     # The heuristic here is to first try "singularizing" the word.  If
     # that doesn't match anything use difflib to find close matches in
     # original, lower and upper case.
-
-    matches = []
-    if s.endswith('s'):
-        if s[:-1] in candidates:
-            matches = [s[:-1]]
-
-    if not len(matches):
-        if isinstance(s, six.text_type):
-            s = strip_accents(s)
-        matches = list(set(
-            difflib.get_close_matches(
-                s, candidates, n=n, cutoff=cutoff) +
-            difflib.get_close_matches(
-                s.lower(), candidates, n=n, cutoff=cutoff) +
-            difflib.get_close_matches(
-                s.upper(), candidates, n=n, cutoff=cutoff)))
+    if s_lower.endswith('s') and s_lower[:-1] in candidates_lower:
+        matches = [s_lower[:-1]]
+    else:
+        matches = difflib.get_close_matches(
+            s_lower, candidates_lower, n=n, cutoff=cutoff)
 
     if len(matches):
-        matches.sort()
+        capitalized_matches = set()
+        for match in matches:
+            capitalized_matches.update(candidates_lower[match])
+
+        matches = sorted(capitalized_matches)
+
         if len(matches) == 1:
             matches = matches[0]
         else:
@@ -901,3 +991,42 @@ def did_you_mean(s, candidates, n=3, cutoff=0.8):
         return 'Did you mean {0}?'.format(matches)
 
     return ''
+
+
+class InheritDocstrings(type):
+    """
+    This metaclass makes methods of a class automatically have their
+    docstrings filled in from the methods they override in the base
+    class.
+
+    If the class uses multiple inheritance, the docstring will be
+    chosen from the first class in the bases list, in the same way as
+    methods are normally resolved in Python.  If this results in
+    selecting the wrong docstring, the docstring will need to be
+    explicitly included on the method.
+
+    For example::
+
+        >>> from astropy.utils.misc import InheritDocstrings
+        >>> from astropy.extern import six
+        >>> @six.add_metaclass(InheritDocstrings)
+        ... class A(object):
+        ...     def wiggle(self):
+        ...         "Wiggle the thingamajig"
+        ...         pass
+        >>> class B(A):
+        ...     def wiggle(self):
+        ...         pass
+        >>> B.wiggle.__doc__
+        u'Wiggle the thingamajig'
+    """
+    def __init__(cls, name, bases, dct):
+        for key, val in six.iteritems(dct):
+            if (inspect.isfunction(val) and
+                not key.startswith('_') and
+                val.__doc__ is None):
+                for base in cls.__mro__[1:]:
+                    super_method = getattr(base, key, None)
+                    if super_method is not None:
+                        val.__doc__ = super_method.__doc__
+                        break

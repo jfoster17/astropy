@@ -1,20 +1,23 @@
+# -*- coding: utf-8 -*-
+
+# TEST_UNICODE_LITERALS
+
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 
 from ...extern import six
 
-from ...tests.helper import remote_data, raises
+from ...tests.helper import remote_data, raises, pytest, catch_warnings
 
 import hashlib
 import io
 import os
 import sys
 
-from ...tests.helper import pytest
-from ..data import _get_download_cache_locs
+from ..data import _get_download_cache_locs, CacheMissingWarning
 
-TESTURL = 'http://www.google.com/index.html'
+TESTURL = 'http://www.astropy.org'
 
 # General file object function
 
@@ -54,16 +57,16 @@ def test_url_nocache():
 
     from ..data import get_readable_fileobj
 
-    with get_readable_fileobj(TESTURL, cache=False) as googlepage:
-        assert googlepage.read().find('oogle</title>') > -1
+    with get_readable_fileobj(TESTURL, cache=False, encoding='utf-8') as page:
+        assert page.read().find('Astropy') > -1
 
 @remote_data
 def test_find_by_hash():
 
     from ..data import get_readable_fileobj, get_pkg_data_filename, clear_download_cache
 
-    with get_readable_fileobj(TESTURL, encoding="binary", cache=True) as googlepage:
-        hash = hashlib.md5(googlepage.read())
+    with get_readable_fileobj(TESTURL, encoding="binary", cache=True) as page:
+        hash = hashlib.md5(page.read())
 
     hashstr = 'hash/' + hash.hexdigest()
 
@@ -78,11 +81,10 @@ def test_find_by_hash():
 
 @remote_data
 def test_find_by_hash():
-    from urllib2 import URLError
     from ..data import get_pkg_data_filename
 
     #this is of course not a real data file and not on any remote server, but it should *try* to go to the remote server
-    with raises(URLError):
+    with pytest.raises(six.moves.urllib.error.URLError):
         get_pkg_data_filename('kjfrhgjklahgiulrhgiuraehgiurhgiuhreglhurieghruelighiuerahiulruli')
 
 
@@ -179,7 +181,7 @@ def test_get_pkg_data_contents():
 
 
 @remote_data
-def test_data_noastropy_fallback(monkeypatch, recwarn):
+def test_data_noastropy_fallback(monkeypatch):
     """
     Tests to make sure the default behavior when the cache directory can't
     be located is correct
@@ -191,10 +193,10 @@ def test_data_noastropy_fallback(monkeypatch, recwarn):
     # needed for testing the *real* lock at the end
     lockdir = os.path.join(_get_download_cache_locs()[0], 'lock')
 
-    #better yet, set the configuration to make sure the temp files are deleted
+    # better yet, set the configuration to make sure the temp files are deleted
     data.DELETE_TEMPORARY_DOWNLOADS_AT_EXIT.set(True)
 
-    #make sure the config and cache directories are not searched
+    # make sure the config and cache directories are not searched
     monkeypatch.setenv('XDG_CONFIG_HOME', 'foo')
     monkeypatch.delenv('XDG_CONFIG_HOME')
     monkeypatch.setenv('XDG_CACHE_HOME', 'bar')
@@ -206,47 +208,52 @@ def test_data_noastropy_fallback(monkeypatch, recwarn):
         raise OSError
     monkeypatch.setattr(paths, '_find_or_create_astropy_dir', osraiser)
 
-    with raises(OSError):
-        #make sure the config dir search fails
+    with pytest.raises(OSError):
+        # make sure the config dir search fails
         paths.get_cache_dir()
 
-    #first try with cache
-    fnout = data.download_file(TESTURL, cache=True)
+    # first try with cache
+    with catch_warnings(CacheMissingWarning) as w:
+        fnout = data.download_file(TESTURL, cache=True)
+
     assert os.path.isfile(fnout)
 
-    assert len(recwarn.list) > 1
-    w1 = recwarn.pop()
-    w2 = recwarn.pop()
+    assert len(w) > 1
 
-    assert w1.category == data.CacheMissingWarning
+    w1 = w.pop(0)
+    w2 = w.pop(0)
+
+    assert w1.category == CacheMissingWarning
     assert 'Remote data cache could not be accessed' in w1.message.args[0]
-    assert w2.category == data.CacheMissingWarning
+    assert w2.category == CacheMissingWarning
     assert 'File downloaded to temporary location' in w2.message.args[0]
     assert fnout == w2.message.args[1]
 
-    #clearing the cache should be a no-up that doesn't affect fnout
-    data.clear_download_cache(TESTURL)
+    # clearing the cache should be a no-up that doesn't affect fnout
+    with catch_warnings(CacheMissingWarning) as w:
+        data.clear_download_cache(TESTURL)
     assert os.path.isfile(fnout)
 
-    #now remove it so tests don't clutter up the temp dir
-    #this should get called at exit, anyway, but we do it here just to make
-    #sure it's working correctly
+    # now remove it so tests don't clutter up the temp dir this should get
+    # called at exit, anyway, but we do it here just to make sure it's working
+    # correctly
     data._deltemps()
     assert not os.path.isfile(fnout)
 
-    assert len(recwarn.list) > 0
-    w3 = recwarn.pop()
+    assert len(w) > 0
+    w3 = w.pop()
 
     assert w3.category == data.CacheMissingWarning
     assert 'Not clearing data cache - cache inacessable' in str(w3.message)
 
     #now try with no cache
-    fnnocache = data.download_file(TESTURL, cache=False)
-    with open(fnnocache, 'rb') as googlepage:
-        assert googlepage.read().decode().find('oogle</title>') > -1
+    with catch_warnings(CacheMissingWarning) as w:
+        fnnocache = data.download_file(TESTURL, cache=False)
+    with open(fnnocache, 'rb') as page:
+        assert page.read().decode('utf-8').find('Astropy') > -1
 
-    #no warnings should be raise in fileobj because cache is unnecessary
-    assert len(recwarn.list) == 0
+    # no warnings should be raise in fileobj because cache is unnecessary
+    assert len(w) == 0
 
     # lockdir determined above as the *real* lockdir, not the temp one
     assert not os.path.isdir(lockdir), 'Cache dir lock was not released!'
@@ -258,12 +265,12 @@ def test_read_unicode():
     contents = get_pkg_data_contents('data/unicode.txt', encoding='utf-8')
     assert isinstance(contents, six.text_type)
     contents = contents.splitlines()[1]
-    assert contents == "\u05d4\u05d0\u05e1\u05d8\u05e8\u05d5\u05e0\u05d5\u05de\u05d9 \u05e4\u05d9\u05d9\u05ea\u05d5\u05df"
+    assert contents == "האסטרונומי פייתון"
 
     contents = get_pkg_data_contents('data/unicode.txt', encoding='binary')
     assert isinstance(contents, bytes)
-    contents = contents.splitlines()[1]
-    assert contents == b"\xd7\x94\xd7\x90\xd7\xa1\xd7\x98\xd7\xa8\xd7\x95\xd7\xa0\xd7\x95\xd7\x9e\xd7\x99 \xd7\xa4\xd7\x99\xd7\x99\xd7\xaa\xd7\x95\xd7\x9f"
+    x = contents.splitlines()[1]
+    assert x == b"\xff\xd7\x94\xd7\x90\xd7\xa1\xd7\x98\xd7\xa8\xd7\x95\xd7\xa0\xd7\x95\xd7\x9e\xd7\x99 \xd7\xa4\xd7\x99\xd7\x99\xd7\xaa\xd7\x95\xd7\x9f"[1:]
 
 
 def test_compressed_stream():
@@ -296,6 +303,7 @@ def test_compressed_stream():
         assert f.read().rstrip() == b'CONTENT'
 
 
+@remote_data
 def test_invalid_location_download():
     """
     checks that download_file gives a URLError and not an AttributeError,
@@ -305,4 +313,14 @@ def test_invalid_location_download():
     from ..data import download_file
 
     with pytest.raises(URLError):
+        download_file('http://astropy.org/nonexistentfile')
+
+def test_invalid_location_download_noconnect():
+    """
+    checks that download_file gives an IOError if the socket is blocked
+    """
+    from ..data import download_file
+
+    # This should invoke socket's monkeypatched failure
+    with pytest.raises(IOError):
         download_file('http://astropy.org/nonexistentfile')

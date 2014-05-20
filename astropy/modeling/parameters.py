@@ -7,7 +7,8 @@ It is unlikely users will need to work with these classes directly, unless they
 define their own models.
 """
 
-from __future__ import division
+from __future__ import (absolute_import, unicode_literals, division,
+                        print_function)
 
 import inspect
 import functools
@@ -16,7 +17,8 @@ import numbers
 import numpy as np
 
 from ..utils import isiterable
-
+from ..utils.compat import ignored
+from ..extern import six
 
 __all__ = ['Parameter', 'InputParameterError']
 
@@ -64,7 +66,7 @@ class Parameter(object):
     Parameter instances never store the actual value of the parameter
     directly.  Rather, each instance of a model stores its own parameters
     as either hidden attributes or (in the case of
-    `~astropy.modeling.core.ParametricModel`) in an array.  A *bound*
+    `~astropy.modeling.FittableModel`) in an array.  A *bound*
     Parameter simply wraps the value in a Parameter proxy which provides some
     additional information about the parameter such as its constraints.
 
@@ -104,14 +106,17 @@ class Parameter(object):
     # See the _nextid classmethod
     _nextid = 1
 
-    def __init__(self, name, description='', default=None, getter=None,
+    def __init__(self, name='', description='', default=None, getter=None,
                  setter=None, fixed=False, tied=False, min=None, max=None,
                  model=None):
         super(Parameter, self).__init__()
+
+        if model is not None and not name:
+            raise TypeError('Bound parameters must have a name specified.')
+
         self._name = name
         self.__doc__ = description.strip()
         self._default = default
-        self._attr = '_' + name
 
         self._default_fixed = fixed
         self._default_tied = tied
@@ -137,11 +142,10 @@ class Parameter(object):
             self._setter = None
 
         if model is not None:
-            try:
+            with ignored(AttributeError):
+                # This can only work if the paramter's value has been set by
+                # the model
                 _, self._shape = self._validate_value(model, self.value)
-            except AttributeError:
-                # This can happen if the paramter's value has not been set yet
-                pass
         else:
             # Only Parameters declared as class-level descriptors require
             # and ordering ID
@@ -153,24 +157,19 @@ class Parameter(object):
             return self
 
         return self.__class__(self._name, default=self._default,
-                              getter=self._getter,
-                              setter=self._setter, model=obj)
+                              getter=self._getter, setter=self._setter,
+                              fixed=self._default_fixed,
+                              tied=self._default_tied, min=self._default_min,
+                              max=self._default_max, model=obj)
 
     def __set__(self, obj, value):
         value, shape = self._validate_value(obj, value)
-        # Compare the shape against the previous value's shape, if it exists
-        if hasattr(obj, self._attr):
-            current_shape = getattr(obj, self.name).shape
-            if shape != current_shape:
-                raise InputParameterError(
-                    "Input value for parameter {0!r} does not have the "
-                    "required shape {1}".format(self.name, current_shape))
 
         if self._setter is not None:
             setter = self._create_value_wrapper(self._setter, obj)
             value = setter(value)
 
-        setattr(obj, self._attr, value)
+        self._set_model_value(obj, value)
 
     def __len__(self):
         if self._model is None:
@@ -200,7 +199,7 @@ class Parameter(object):
             if len(oldvalue[key]) == 0:
                 raise InputParameterError(
                     "Slice assignment outside the parameter dimensions for "
-                    "{0!r}".format(self.name))
+                    "'{0}'".format(self.name))
             for idx, val in zip(range(*key.indices(len(self))), value):
                 self.__setitem__(idx, val)
         else:
@@ -210,14 +209,14 @@ class Parameter(object):
                     self.value = value
             except IndexError:
                 raise InputParameterError(
-                    "Input dimension {0} invalid for {1!r} parameter with "
+                    "Input dimension {0} invalid for '{1}' parameter with "
                     "dimension {2}".format(key, self.name, param_dim))
 
     def __repr__(self):
         if self._model is None:
-            return 'Parameter({0!r})'.format(self._name)
+            return "Parameter('{0}')".format(self._name)
         else:
-            return 'Parameter({0!r}, value={1!r})'.format(
+            return "Parameter('{0}', value={1})".format(
                 self._name, self.value)
 
     @property
@@ -242,28 +241,26 @@ class Parameter(object):
     def value(self):
         """The unadorned value proxied by this parameter"""
 
-        if self._model is not None:
-            if not hasattr(self._model, self._attr):
-                if self._default is not None:
-                    value = self.default
-                else:
-                    raise AttributeError(
-                        'Parameter value for {0!r} not set'.format(self._name))
-            else:
-                value = getattr(self._model, self._attr)
-            if self._getter is None:
-                return value
-            else:
-                return self._getter(value)
-        raise AttributeError('Parameter definition does not have a value')
+        if self._model is None:
+            raise AttributeError('Parameter definition does not have a value')
+
+        value = self._get_model_value(self._model)
+
+        if self._getter is None:
+            return value
+        else:
+            return self._getter(value)
 
     @value.setter
-    def value(self, val):
-        if self._model is not None:
-            if self._setter is not None:
-                val = self._setter(val)
-            setattr(self._model, self._attr, val)
-        raise AttributeError('Cannot set a value on a parameter definition')
+    def value(self, value):
+        if self._model is None:
+            raise AttributeError('Cannot set a value on a parameter '
+                                 'definition')
+
+        if self._setter is not None:
+            val = self._setter(value)
+
+        self._set_model_value(self._model, value)
 
     @property
     def shape(self):
@@ -284,8 +281,8 @@ class Parameter(object):
         """
 
         if self._model is not None:
-            fixed = self._model._constraints.setdefault('fixed', {})
-            return fixed.setdefault(self._name, self._default_fixed)
+            fixed = self._model._constraints['fixed']
+            return fixed.get(self._name, self._default_fixed)
         else:
             return self._default_fixed
 
@@ -293,11 +290,9 @@ class Parameter(object):
     def fixed(self, value):
         """Fix a parameter"""
         if self._model is not None:
-            assert isinstance(value, bool), "Fixed can be True or False"
-            fixed = self._model._constraints.setdefault('fixed', {})
-            fixed[self._name] = value
-            self._model._fit_parameters, self._model._fit_param_indices, \
-                = self._model._model_to_fit_params()
+            if not isinstance(value, bool):
+                raise TypeError("Fixed can be True or False")
+            self._model._constraints['fixed'][self._name] = value
         else:
             raise AttributeError("can't set attribute 'fixed' on Parameter "
                                  "definition")
@@ -311,8 +306,8 @@ class Parameter(object):
         """
 
         if self._model is not None:
-            tied = self._model._constraints.setdefault('tied', {})
-            return tied.setdefault(self._name, self._default_tied)
+            tied = self._model._constraints['tied']
+            return tied.get(self._name, self._default_tied)
         else:
             return self._default_tied
 
@@ -321,12 +316,9 @@ class Parameter(object):
         """Tie a parameter"""
 
         if self._model is not None:
-            assert callable(value) or value in (False, None), \
-                    "Tied must be a callable"
-            tied = self._model._constraints.setdefault('tied', {})
-            tied[self._name] = value
-            self._model._fit_parameters, self._model._fit_param_indices, \
-                = self._model._model_to_fit_params()
+            if not six.callable(value) and value not in (False, None):
+                    raise TypeError("Tied must be a callable")
+            self._model._constraints['tied'][self._name] = value
         else:
             raise AttributeError("can't set attribute 'tied' on Parameter "
                                  "definition")
@@ -336,9 +328,9 @@ class Parameter(object):
         """The minimum and maximum values of a parameter as a tuple"""
 
         if self._model is not None:
-            bounds = self._model._constraints.setdefault('bounds', {})
-            return bounds.setdefault(self._name,
-                                     (self._default_min, self._default_max))
+            bounds = self._model._constraints['bounds']
+            default_bounds = (self._default_min, self._default_max)
+            return bounds.get(self._name, default_bounds)
         else:
             return (self._default_min, self._default_max)
 
@@ -349,18 +341,17 @@ class Parameter(object):
         if self._model is not None:
             _min, _max = value
             if _min is not None:
-                assert isinstance(_min, numbers.Number), \
-                        "Min value must be a number"
+                if not isinstance(_min, numbers.Number):
+                        raise TypeError("Min value must be a number")
                 _min = float(_min)
 
             if _max is not None:
-                assert isinstance(_max, numbers.Number), \
-                        "Max value must be a number"
+                if not isinstance(_max, numbers.Number):
+                        raise TypeError("Max value must be a number")
                 _max = float(_max)
 
             bounds = self._model._constraints.setdefault('bounds', {})
-            bounds[self._name] = (_min, _max)
-            self._model._model_to_fit_params()
+            self._model._constraints['bounds'][self._name] = (_min, _max)
         else:
             raise AttributeError("can't set attribute 'bounds' on Parameter "
                                  "definition")
@@ -410,6 +401,52 @@ class Parameter(object):
         cls._nextid += 1
         return nextid
 
+    def _get_model_value(self, model):
+        """
+        This method implements how to retrieve the value of this parameter from
+        the model instance.  See also `Parameter._set_model_value`.
+
+        These methods take an explicit model argument rather than using
+        self._model so that they can be used from unbound `Parameter`
+        instances.
+        """
+
+        if not hasattr(model, '_parameters'):
+            # The _parameters array hasn't been initialized yet; just translate
+            # this to an AttributeError
+            raise AttributeError(self._name)
+
+        # Use the _param_metrics to extract the parameter value from the
+        # _parameters array
+        param_slice, param_shape = model._param_metrics[self._name]
+        value = model._parameters[param_slice]
+        if param_shape:
+            value = value.reshape(param_shape)
+        else:
+            value = value[0]
+        return value
+
+    def _set_model_value(self, model, value):
+        """
+        This method implements how to store the value of a parameter on the
+        model instance.
+
+        Currently there is only one storage mechanism (via the ._parameters
+        array) but other mechanisms may be desireable, in which case really the
+        model class itself should dictate this and *not* `Parameter` itself.
+        """
+
+        # TODO: Maybe handle exception on invalid input shape
+        param_slice, param_shape = model._param_metrics[self._name]
+        param_size = np.prod(param_shape)
+
+        if np.size(value) != param_size:
+            raise InputParameterError(
+                "Input value for parameter {0!r} does not have {1} elements "
+                "as the current value does".format(self._name, param_size))
+
+        model._parameters[param_slice] = np.array(value).ravel()
+
     def _validate_value(self, model, value):
         if model is None:
             return
@@ -425,7 +462,7 @@ class Parameter(object):
             except (TypeError, IndexError):
                 raise InputParameterError(
                     "Expected a multivalued input of dimension {0} "
-                    "for parameter {1!r}".format(param_dim, self.name))
+                    "for parameter '{1}'".format(param_dim, self.name))
 
             return value, shape
 
@@ -482,6 +519,9 @@ class Parameter(object):
     def __pow__(self, val):
         return self.value ** val
 
+    def __rpow__(self, val):
+        return val ** self.value
+
     def __div__(self, val):
         return self.value / val
 
@@ -513,7 +553,7 @@ class Parameter(object):
         return (np.asarray(self) >= np.asarray(val)).all()
 
     def __neg__(self):
-        return -self.value * (-1)
+        return -self.value
 
     def __abs__(self):
         return np.abs(self.value)

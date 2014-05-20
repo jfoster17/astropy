@@ -3,30 +3,19 @@
 Test the conversion to/from astropy.table
 """
 
+# TEST_UNICODE_LITERALS
+
 import io
 import os
-import shutil
-import tempfile
-from distutils import version
 
 import numpy as np
-from ....tests.helper import pytest
 
 from ....utils.data import get_pkg_data_filename, get_pkg_data_fileobj
 from ..table import parse, writeto
 from .. import tree
 
-TMP_DIR = None
-def setup_module():
-    global TMP_DIR
-    TMP_DIR = tempfile.mkdtemp()
 
-
-def teardown_module():
-    shutil.rmtree(TMP_DIR)
-
-
-def test_table():
+def test_table(tmpdir):
     # Read the VOTABLE
     votable = parse(
         get_pkg_data_filename('data/regression.xml'),
@@ -77,10 +66,10 @@ def test_table():
         if 'arraysize' in d:
             assert field.arraysize == d['arraysize']
 
-    writeto(votable2, os.path.join(TMP_DIR, "through_table.xml"))
+    writeto(votable2, os.path.join(str(tmpdir), "through_table.xml"))
 
 
-def test_read_through_table_interface():
+def test_read_through_table_interface(tmpdir):
     from ....table import Table
 
     with get_pkg_data_fileobj('data/regression.xml', encoding='binary') as fd:
@@ -88,7 +77,7 @@ def test_read_through_table_interface():
 
     assert len(t) == 5
 
-    fn = os.path.join(TMP_DIR, "table_interface.xml")
+    fn = os.path.join(str(tmpdir), "table_interface.xml")
     t.write(fn, table_id='FOO', format='votable')
 
     with open(fn, 'rb') as fd:
@@ -133,7 +122,24 @@ def test_table_read_with_unnamed_tables():
 def test_from_table_without_mask():
     from ....table import Table, Column
     t = Table()
-    c = Column(data=[1,2,3], name='a')
+    c = Column(data=[1, 2, 3], name='a')
     t.add_column(c)
     output = io.BytesIO()
     t.write(output, format='votable')
+
+
+def test_write_with_format():
+    from ....table import Table, Column
+    t = Table()
+    c = Column(data=[1, 2, 3], name='a')
+    t.add_column(c)
+
+    output = io.BytesIO()
+    t.write(output, format='votable', tabledata_format="binary")
+    assert b'BINARY' in output.getvalue()
+    assert b'TABLEDATA' not in output.getvalue()
+
+    output = io.BytesIO()
+    t.write(output, format='votable', tabledata_format="binary2")
+    assert b'BINARY2' in output.getvalue()
+    assert b'TABLEDATA' not in output.getvalue()

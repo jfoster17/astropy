@@ -8,6 +8,8 @@ from ..header import Header
 from ..util import (_is_pseudo_unsigned, _unsigned_zero, _is_int,
                     _normalize_slice)
 
+from ....extern.six import string_types
+from ....extern.six.moves import xrange
 from ....utils import lazyproperty
 
 
@@ -42,7 +44,7 @@ class _ImageBaseHDU(_ValidHDU):
     }
 
     def __init__(self, data=None, header=None, do_not_scale_image_data=False,
-                 uint=False, scale_back=False, **kwargs):
+                 uint=False, scale_back=False, ignore_blank=False, **kwargs):
 
         from .groups import GroupsHDU
 
@@ -100,6 +102,7 @@ class _ImageBaseHDU(_ValidHDU):
             self._header = header
 
         self._do_not_scale_image_data = do_not_scale_image_data
+
         self._uint = uint
         self._scale_back = scale_back
 
@@ -117,11 +120,12 @@ class _ImageBaseHDU(_ValidHDU):
         self._bitpix = self._header.get('BITPIX', 8)
         self._gcount = self._header.get('GCOUNT', 1)
         self._pcount = self._header.get('PCOUNT', 0)
-        self._blank = self._header.get('BLANK')
+        self._blank = None if ignore_blank else self._header.get('BLANK')
 
         self._orig_bitpix = self._bitpix
         self._orig_bzero = self._bzero
         self._orig_bscale = self._bscale
+        self._orig_blank = self._header.get('BLANK')
 
         # Set the name attribute if it was provided (if this is an ImageHDU
         # this will result in setting the EXTNAME keyword of the header as
@@ -195,6 +199,19 @@ class _ImageBaseHDU(_ValidHDU):
 
     @lazyproperty
     def data(self):
+        """
+        Image/array data as a `~numpy.ndarray`.
+
+        Please remember that the order of axes on an Numpy array are opposite
+        of the order specified in the FITS file.  For example for a 2D image
+        the "rows" or y-axis are the first dimension, and the "columns" or
+        x-axis are the second dimension.
+
+        If the data is scaled using the BZERO and BSCALE parameters, this
+        attribute returns the data scaled to its physical values unless the
+        file was opened with ``do_not_scale_image_data=True``.
+        """
+
         if len(self._axes) < 1:
             return
 
@@ -302,11 +319,24 @@ class _ImageBaseHDU(_ValidHDU):
             except KeyError:
                 pass
 
+        self._update_uint_scale_keywords()
+
         self._modified = False
 
     def _update_header_scale_info(self, dtype=None):
         if (not self._do_not_scale_image_data and
                 not (self._orig_bzero == 0 and self._orig_bscale == 1)):
+
+            if dtype is None:
+                dtype = self._dtype_for_bitpix()
+
+            if (dtype is not None and dtype.kind == 'u' and
+                    (self._scale_back or self._scale_back is None)):
+                # Data is pseudo-unsigned integers, and the scale_back option
+                # was not explicitly set to False, so preserve all the scale
+                # factors
+                return
+
             for keyword in ['BSCALE', 'BZERO']:
                 try:
                     del self._header[keyword]
@@ -330,11 +360,10 @@ class _ImageBaseHDU(_ValidHDU):
         """
         Scale image data by using ``BSCALE``/``BZERO``.
 
-        Call to this method will scale `data` and update the keywords
-        of ``BSCALE`` and ``BZERO`` in `_header`.  This method should
-        only be used right before writing to the output file, as the
-        data will be scaled and is therefore not very usable after the
-        call.
+        Call to this method will scale `data` and update the keywords of
+        ``BSCALE`` and ``BZERO`` in the HDU's header.  This method should only
+        be used right before writing to the output file, as the data will be
+        scaled and is therefore not very usable after the call.
 
         Parameters
         ----------
@@ -348,10 +377,10 @@ class _ImageBaseHDU(_ValidHDU):
             ``BSCALE`` and ``BZERO`` values when the data was
             read/created. If ``"minmax"``, use the minimum and maximum
             of the data to scale.  The option will be overwritten by
-            any user specified `bscale`/`bzero` values.
+            any user specified ``bscale``/``bzero`` values.
 
         bscale, bzero : int, optional
-            User-specified ``BSCALE`` and ``BZERO`` values.
+            User-specified ``BSCALE`` and ``BZERO`` values
         """
 
         if self.data is None:
@@ -520,6 +549,7 @@ class _ImageBaseHDU(_ValidHDU):
             bits = dtype.itemsize * 8
             data = np.array(data, dtype=dtype)
             data -= np.uint64(1 << (bits - 1))
+
             return data
 
     def _get_scaled_image_data(self, offset, shape):
@@ -781,7 +811,8 @@ class PrimaryHDU(_ImageBaseHDU):
     _default_name = 'PRIMARY'
 
     def __init__(self, data=None, header=None, do_not_scale_image_data=False,
-                 uint=False, scale_back=False):
+                 ignore_blank=False,
+                 uint=False, scale_back=None):
         """
         Construct a primary HDU.
 
@@ -791,8 +822,8 @@ class PrimaryHDU(_ImageBaseHDU):
             The data in the HDU.
 
         header : Header instance, optional
-            The header to be used (as a template).  If `header` is
-            `None`, a minimal header will be provided.
+            The header to be used (as a template).  If ``header`` is `None`, a
+            minimal header will be provided.
 
         do_not_scale_image_data : bool, optional
             If `True`, image data is not scaled using BSCALE/BZERO values
@@ -801,8 +832,8 @@ class PrimaryHDU(_ImageBaseHDU):
         uint : bool, optional
             Interpret signed integer data where ``BZERO`` is the
             central value and ``BSCALE == 1`` as unsigned integer
-            data.  For example, `int16` data with ``BZERO = 32768``
-            and ``BSCALE = 1`` would be treated as `uint16` data.
+            data.  For example, ``int16`` data with ``BZERO = 32768``
+            and ``BSCALE = 1`` would be treated as ``uint16`` data.
 
         scale_back : bool, optional
             If `True`, when saving changes to a file that contained scaled
@@ -810,11 +841,17 @@ class PrimaryHDU(_ImageBaseHDU):
             original BSCALE/BZERO values.  This could lead to loss of accuracy
             if scaling back to integer values after performing floating point
             operations on the data.
+
+        ignore_blank : bool, optional
+            If `True`, the BLANK header keyword will be ignored if present.
+            Otherwise, pixels equal to this value will be replaced with
+            NaNs.
         """
 
         super(PrimaryHDU, self).__init__(
             data=data, header=header,
             do_not_scale_image_data=do_not_scale_image_data, uint=uint,
+            ignore_blank=ignore_blank,
             scale_back=scale_back)
 
         # insert the keywords EXTEND
@@ -864,7 +901,7 @@ class ImageHDU(_ImageBaseHDU, ExtensionHDU):
     _extension = 'IMAGE'
 
     def __init__(self, data=None, header=None, name=None,
-                 do_not_scale_image_data=False, uint=False, scale_back=False):
+                 do_not_scale_image_data=False, uint=False, scale_back=None):
         """
         Construct an image HDU.
 
@@ -888,8 +925,8 @@ class ImageHDU(_ImageBaseHDU, ExtensionHDU):
         uint : bool, optional
             Interpret signed integer data where ``BZERO`` is the
             central value and ``BSCALE == 1`` as unsigned integer
-            data.  For example, `int16` data with ``BZERO = 32768``
-            and ``BSCALE = 1`` would be treated as `uint16` data.
+            data.  For example, ``int16`` data with ``BZERO = 32768``
+            and ``BSCALE = 1`` would be treated as ``uint16`` data.
 
         scale_back : bool, optional
             If `True`, when saving changes to a file that contained scaled
@@ -911,7 +948,7 @@ class ImageHDU(_ImageBaseHDU, ExtensionHDU):
     def match_header(cls, header):
         card = header.cards[0]
         xtension = card.value
-        if isinstance(xtension, basestring):
+        if isinstance(xtension, string_types):
             xtension = xtension.rstrip()
         return card.keyword == 'XTENSION' and xtension == cls._extension
 

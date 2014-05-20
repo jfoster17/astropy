@@ -18,7 +18,7 @@ from ..extern.six.moves import xrange
 
 __all__ = ['sigma_clip', 'binom_conf_interval', 'binned_binom_proportion',
            'median_absolute_deviation', 'biweight_location',
-           'biweight_midvariance', 'signal_to_noise_oir_ccd','bootstrap']
+           'biweight_midvariance', 'signal_to_noise_oir_ccd', 'bootstrap']
 
 
 __doctest_skip__ = ['binned_binom_proportion']
@@ -34,8 +34,9 @@ def sigma_clip(data, sig=3, iters=1, cenfunc=np.median, varfunc=np.var,
     standard deviations discrepant.
 
     .. note::
-        `scipy.stats.sigmaclip` provides a subset of the functionality in this
-        function.
+        `scipy.stats.sigmaclip
+        <http://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.sigmaclip.html>`_
+        provides a subset of the functionality in this function.
 
     Parameters
     ----------
@@ -44,10 +45,10 @@ def sigma_clip(data, sig=3, iters=1, cenfunc=np.median, varfunc=np.var,
     sig : float
         The number of standard deviations (*not* variances) to use as the
         clipping limit.
-    iters : int or None
-        The number of iterations to perform clipping for, or None to clip until
-        convergence is achieved (i.e. continue until the last iteration clips
-        nothing).
+    iters : int or `None`
+        The number of iterations to perform clipping for, or `None` to clip
+        until convergence is achieved (i.e. continue until the last
+        iteration clips nothing).
     cenfunc : callable
         The technique to compute the center for the clipping. Must be a
         callable that takes in a masked array and outputs the central value.
@@ -56,28 +57,28 @@ def sigma_clip(data, sig=3, iters=1, cenfunc=np.median, varfunc=np.var,
         The technique to compute the standard deviation about the center. Must
         be a callable that takes in a masked array and outputs a width
         estimator.  Defaults to the standard deviation (numpy.var).
-    axis : int or None
-        If not None, clip along the given axis.  For this case, axis=int will
+    axis : int or `None`
+        If not `None`, clip along the given axis.  For this case, axis=int will
         be passed on to cenfunc and varfunc, which are expected to return an
         array with the axis dimension removed (like the numpy functions).
-        If None, clip over all values.  Defaults to None.
+        If `None`, clip over all values.  Defaults to `None`.
     copy : bool
-        If True, the data array will be copied.  If False, the masked array
-        data will contain the same array as `data`.  Defaults to True.
+        If `True`, the data array will be copied.  If `False`, the masked array
+        data will contain the same array as ``data``.  Defaults to `True`.
 
     Returns
     -------
-    filtered_data : `numpy.masked.MaskedArray`
-        A masked array with the same shape as `data` input, where the points
+    filtered_data : `numpy.ma.MaskedArray`
+        A masked array with the same shape as ``data`` input, where the points
         rejected by the algorithm have been masked.
 
     Notes
     -----
-     1. The routine works by calculating
+     1. The routine works by calculating::
 
             deviation = data - cenfunc(data [,axis=int])
 
-        and then setting a mask for points outside the range
+        and then setting a mask for points outside the range::
 
             data.mask = deviation**2 > sig**2 * varfunc(deviation)
 
@@ -153,7 +154,7 @@ def sigma_clip(data, sig=3, iters=1, cenfunc=np.median, varfunc=np.var,
     return filtered_data
 
 
-#TODO Note scipy dependency
+# TODO Note scipy dependency
 def binom_conf_interval(k, n, conf=0.68269, interval='wilson'):
     r"""Binomial proportion confidence interval given k successes,
     n trials.
@@ -161,23 +162,27 @@ def binom_conf_interval(k, n, conf=0.68269, interval='wilson'):
     Parameters
     ----------
     k : int or numpy.ndarray
-        Number of successes (0 <= `k` <= `n`).
+        Number of successes (0 <= ``k`` <= ``n``).
     n : int or numpy.ndarray
-        Number of trials (`n` > 0).
+        Number of trials (``n`` > 0).  If both ``k`` and ``n`` are arrays,
+        they must have the same shape.
     conf : float in [0, 1], optional
-        Desired probability content of interval. Default is 0.68269.
-    interval : {'wilson', 'jeffreys', 'wald'}, optional
-        Formula used for confidence interval. See notes for details.
-        The 'wilson' and 'jeffreys' intervals generally give similar results.
-        'wilson' should be somewhat faster, while 'jeffreys' is marginally
-        superior. The 'wald' interval is generally not recommended.
-        It is provided for comparison purposes. Default is 'wilson'.
+        Desired probability content of interval. Default is 0.68269,
+        corresponding to 1 sigma in a 1-dimensional Gaussian distribution.
+    interval : {'wilson', 'jeffreys', 'flat', 'wald'}, optional
+        Formula used for confidence interval. See notes for details.  The
+        ``'wilson'`` and ``'jeffreys'`` intervals generally give similar
+        results, while 'flat' is somewhat different, especially for small
+        values of ``n``.  ``'wilson'`` should be somewhat faster than
+        ``'flat'`` or ``'jeffreys'``.  The 'wald' interval is generally not
+        recommended.  It is provided for comparison purposes.  Default is
+        ``'wilson'``.
 
     Returns
     -------
     conf_interval : numpy.ndarray
-        `conf_interval[0]` and `conf_interval[1]` correspond to the lower
-        and upper limits, respectively, for each element in `k`, `n`.
+        ``conf_interval[0]`` and ``conf_interval[1]`` correspond to the lower
+        and upper limits, respectively, for each element in ``k``, ``n``.
 
     Notes
     -----
@@ -189,7 +194,7 @@ def binom_conf_interval(k, n, conf=0.68269, interval='wilson'):
     as a reasonable best estimate of the true probability
     :math:`\epsilon`. However, deriving an accurate confidence
     interval on :math:`\epsilon` is non-trivial. There are several
-    formulas for this interval (see [1]_). Three intervals are implemented
+    formulas for this interval (see [1]_). Four intervals are implemented
     here:
 
     **1. The Wilson Interval.** This interval, attributed to Wilson [2]_,
@@ -221,6 +226,8 @@ def binom_conf_interval(k, n, conf=0.68269, interval='wilson'):
 
         f(\epsilon) = \pi^{-1} \epsilon^{-1/2}(1-\epsilon)^{-1/2}.
 
+    The justification for this prior is that it is invariant under
+    reparameterizations of the binomial proportion.
     The posterior density function is also a Beta distribution: Beta(k
     + 1/2, N - k + 1/2). The interval is then chosen so that it is
     *equal-tailed*: Each tail (outside the interval) contains
@@ -232,7 +239,14 @@ def binom_conf_interval(k, n, conf=0.68269, interval='wilson'):
     and the interval itself contains 1 - :math:`\alpha`/2 rather than
     the nominal 1 - :math:`\alpha`.
 
-    **3. The Wald Interval.** This interval is given by
+    **3. A Flat prior.** This is similar to the Jeffreys interval,
+    but uses a flat (uniform) prior on the binomial proportion
+    over the range 0 to 1 rather than the reparametrization-invariant
+    Jeffreys prior.  The posterior density function is a Beta distribution:
+    Beta(k + 1, N - k + 1).  The same comments about the nature of the
+    interval (equal-tailed, etc.) also apply to this option.
+
+    **4. The Wald Interval.** This interval is given by
 
     .. math::
 
@@ -282,6 +296,10 @@ def binom_conf_interval(k, n, conf=0.68269, interval='wilson'):
     array([[ 0.        ,  0.0842525 ,  0.21789949,  0.82788246],
            [ 0.17211754,  0.42218001,  0.61753691,  1.        ]])
 
+    >>> binom_conf_interval([0, 1, 2, 5], 5, interval='flat')
+    array([[ 0.        ,  0.12139799,  0.24309021,  0.73577037],
+           [ 0.26422963,  0.45401727,  0.61535699,  1.        ]])
+
     In contrast, the Wald interval gives poor results for small k, N.
     For k = 0 or k = N, the interval always has zero length.
 
@@ -304,6 +322,7 @@ def binom_conf_interval(k, n, conf=0.68269, interval='wilson'):
 
     k = np.asarray(k).astype(np.int)
     n = np.asarray(n).astype(np.int)
+
     if (n <= 0).any():
         raise ValueError('n must be positive')
     if (k < 0).any() or (k > n).any():
@@ -326,39 +345,51 @@ def binom_conf_interval(k, n, conf=0.68269, interval='wilson'):
             # Correct intervals out of range due to floating point errors.
             conf_interval[conf_interval < 0.] = 0.
             conf_interval[conf_interval > 1.] = 1.
-            return conf_interval
-
         else:
             midpoint = p
             halflength = kappa * np.sqrt(p * (1. - p) / n)
-            return np.array([midpoint - halflength, midpoint + halflength])
+            conf_interval = np.array([midpoint - halflength,
+                                      midpoint + halflength])
 
-    elif interval == 'jeffreys':
+    elif interval == 'jeffreys' or interval == 'flat':
         from scipy.special import betaincinv
 
-        lowerbound = betaincinv(k + 0.5, n - k + 0.5, alpha / 2.)
-        upperbound = betaincinv(k + 0.5, n - k + 0.5, 1. - alpha / 2.)
+        if interval == 'jeffreys':
+            lowerbound = betaincinv(k + 0.5, n - k + 0.5, 0.5 * alpha)
+            upperbound = betaincinv(k + 0.5, n - k + 0.5, 1. - 0.5 * alpha)
+        else:
+            lowerbound = betaincinv(k + 1, n - k + 1, 0.5 * alpha)
+            upperbound = betaincinv(k + 1, n - k + 1, 1. - 0.5 * alpha)
 
-        # Set lower or upper bound to k/n when k/n = 0 or 1.
-        lowerbound[k == 0] = 0.
-        upperbound[k == n] = 1.
+        # Set lower or upper bound to k/n when k/n = 0 or 1
+        #  We have to treat the special case of k/n being scalars,
+        #  which is an ugly kludge
+        if lowerbound.ndim == 0:
+            if k == 0:
+                lowerbound = 0.
+            elif k == n:
+                upperbound = 1.
+        else:
+            lowerbound[k == 0] = 0
+            upperbound[k == n] = 1
 
-        return np.array([lowerbound, upperbound])
-
+        conf_interval = np.array([lowerbound, upperbound])
     else:
         raise ValueError('Unrecognized interval: {0:s}'.format(interval))
 
+    return conf_interval
 
-#TODO Note scipy dependency (needed in binom_conf_interval)
+
+# TODO Note scipy dependency (needed in binom_conf_interval)
 def binned_binom_proportion(x, success, bins=10, range=None, conf=0.68269,
                             interval='wilson'):
     """Binomial proportion and confidence interval in bins of a continuous
-    variable `x`.
+    variable ``x``.
 
-    Given a set of datapoint pairs where the `x` values are
-    continuously distributed and the `success` values are binomial
+    Given a set of datapoint pairs where the ``x`` values are
+    continuously distributed and the ``success`` values are binomial
     ("success / failure" or "true / false"), place the pairs into
-    bins according to `x` value and calculate the binomial proportion
+    bins according to ``x`` value and calculate the binomial proportion
     (fraction of successes) and confidence interval in each bin.
 
     Parameters
@@ -366,8 +397,8 @@ def binned_binom_proportion(x, success, bins=10, range=None, conf=0.68269,
     x : list_like
         Values.
     success : list_like (bool)
-        Success (True) or failure (False) corresponding to each value
-        in `x`.  Must be same length as `x`.
+        Success (`True`) or failure (`False`) corresponding to each value
+        in ``x``.  Must be same length as ``x``.
     bins : int or sequence of scalars, optional
         If bins is an int, it defines the number of equal-width bins
         in the given range (10, by default). If bins is a sequence, it
@@ -375,18 +406,19 @@ def binned_binom_proportion(x, success, bins=10, range=None, conf=0.68269,
         for non-uniform bin widths (in this case, 'range' is ignored).
     range : (float, float), optional
         The lower and upper range of the bins. If `None` (default),
-        the range is set to (x.min(), x.max()). Values outside the
+        the range is set to ``(x.min(), x.max())``. Values outside the
         range are ignored.
     conf : float in [0, 1], optional
         Desired probability content in the confidence
-        interval (p - perr[0], p + perr[1]) in each bin. Default is
+        interval ``(p - perr[0], p + perr[1])`` in each bin. Default is
         0.68269.
-    interval : {'wilson', 'jeffreys', 'wald'}, optional
+    interval : {'wilson', 'jeffreys', 'flat', 'wald'}, optional
         Formula used to calculate confidence interval on the
         binomial proportion in each bin. See `binom_conf_interval` for
-        definition of the intervals.  The 'wilson' and 'jeffreys'
-        intervals generally give similar results.  'wilson' should be
-        somewhat faster, while 'jeffreys' is marginally superior.
+        definition of the intervals.  The 'wilson', 'jeffreys',
+        and 'flat' intervals generally give similar results.  'wilson'
+        should be somewhat faster, while 'jeffreys' and 'flat' are
+        marginally superior, but differ in the assumed prior.
         The 'wald' interval is generally not recommended.
         It is provided for comparison purposes. Default is 'wilson'.
 
@@ -395,8 +427,8 @@ def binned_binom_proportion(x, success, bins=10, range=None, conf=0.68269,
     bin_ctr : numpy.ndarray
         Central value of bins. Bins without any entries are not returned.
     bin_halfwidth : numpy.ndarray
-        Half-width of each bin such that `bin_ctr - bin_halfwidth` and
-        `bin_ctr + bins_halfwidth` give the left and right side of each bin,
+        Half-width of each bin such that ``bin_ctr - bin_halfwidth`` and
+        ``bin_ctr + bins_halfwidth`` give the left and right side of each bin,
         respectively.
     p : numpy.ndarray
         Efficiency in each bin.
@@ -460,13 +492,13 @@ def binned_binom_proportion(x, success, bins=10, range=None, conf=0.68269,
        plt.show()
 
     The above example uses the Wilson confidence interval to calculate
-    the uncertainty `perr` in each bin (see the definition of various
+    the uncertainty ``perr`` in each bin (see the definition of various
     confidence intervals in `binom_conf_interval`). A commonly used
     alternative is the Wald interval. However, the Wald interval can
     give nonsensical uncertainties when the efficiency is near 0 or 1,
     and is therefore **not** recommended. As an illustration, the
     following example shows the same data as above but uses the Wald
-    interval rather than the Wilson interval to calculate `perr`:
+    interval rather than the Wilson interval to calculate ``perr``:
 
     >>> bins, binshw, p, perr = binned_binom_proportion(mag, detected, bins=20,
     ...                                                 interval='wald')
@@ -532,7 +564,7 @@ def median_absolute_deviation(a, axis=None):
     """Compute the median absolute deviation.
 
     Returns the median absolute deviation (MAD) of the array elements.
-    The MAD is defined as :math `median( \|a - median (a)\| )`.
+    The MAD is defined as ``median(abs(a - median(a)))``.
 
     Parameters
     ----------
@@ -570,13 +602,11 @@ def median_absolute_deviation(a, axis=None):
     a = np.array(a, copy=False)
     a_median = np.median(a, axis=axis)
 
-    #re-broadcast the output median array to subtract it
+    # re-broadcast the output median array to subtract it
     if axis is not None:
-        shape = list(a_median.shape)
-        shape.append(1)
-        a_median = a_median.reshape(shape)
+        a_median = np.expand_dims(a_median, axis=axis)
 
-    #calculated the median average deviation
+    # calculated the median average deviation
     return np.median(np.abs(a - a_median), axis=axis)
 
 
@@ -584,8 +614,8 @@ def biweight_location(a, c=6.0, M=None):
     """Compute the biweight location for an array.
 
     Returns the biweight location for the array elements.
-    The biweight is a robust statistic for determining the central location of a
-    distribution.
+    The biweight is a robust statistic for determining the central
+    location of a distribution.
 
     The biweight location is given by the following equation
 
@@ -641,13 +671,13 @@ def biweight_location(a, c=6.0, M=None):
     if M is None:
         M = np.median(a)
 
-    #set up the difference
+    # set up the difference
     d = a - M
 
-    #set up the weighting
+    # set up the weighting
     u = d / c / median_absolute_deviation(a)
 
-    #now remove the outlier points
+    # now remove the outlier points
     mask = np.abs(u) < 1
 
     u = (1 - u**2)**2
@@ -658,8 +688,8 @@ def biweight_midvariance(a, c=9.0, M=None):
     """Compute the biweight midvariance for an array.
 
     Returns the biweight midvariance for the array elements.
-    The biweight midvariance is a robust statistic for determining the midvariance (i.e. the
-    standard deviation) of a distribution.
+    The biweight midvariance is a robust statistic for determining
+    the midvariance (i.e. the standard deviation) of a distribution.
 
     The biweight location is given by the following equation
 
@@ -690,7 +720,7 @@ def biweight_midvariance(a, c=9.0, M=None):
 
     Returns
     -------
-    biweight_midvariance: float
+    biweight_midvariance : float
         Returns the biweight midvariance for the array elements.
 
     Examples
@@ -707,7 +737,6 @@ def biweight_midvariance(a, c=9.0, M=None):
     See Also
     --------
     median_absolute_deviation, biweight_location
-
     """
 
     a = np.array(a, copy=False)
@@ -715,13 +744,13 @@ def biweight_midvariance(a, c=9.0, M=None):
     if M is None:
         M = np.median(a)
 
-    #set up the difference
+    # set up the difference
     d = a - M
 
-    #set up the weighting
+    # set up the weighting
     u = d / c / median_absolute_deviation(a)
 
-    #now remove the outlier points
+    # now remove the outlier points
     mask = np.abs(u) < 1
 
     u = u**2
@@ -730,7 +759,8 @@ def biweight_midvariance(a, c=9.0, M=None):
         / np.abs(((1 - u[mask]) * (1 - 5 * u[mask])).sum())
 
 
-def signal_to_noise_oir_ccd(t, source_eps, sky_eps, dark_eps, rd, npix, gain=1.0):
+def signal_to_noise_oir_ccd(t, source_eps, sky_eps, dark_eps, rd, npix,
+                            gain=1.0):
     """Computes the signal to noise ratio for source being observed in the
     optical/IR using a CCD.
 
@@ -767,7 +797,8 @@ def signal_to_noise_oir_ccd(t, source_eps, sky_eps, dark_eps, rd, npix, gain=1.0
         Signal to noise ratio calculated from the inputs
     """
     signal = t*source_eps*gain
-    noise = np.sqrt(t*(source_eps*gain + npix*(sky_eps*gain + dark_eps)) + npix*rd**2 )
+    noise = np.sqrt(t * (source_eps * gain + npix *
+                         (sky_eps * gain + dark_eps)) + npix * rd**2)
     return signal / noise
 
 
@@ -789,11 +820,11 @@ def bootstrap(data, bootnum=100, samples=None, bootfunc=None):
     bootnum : int
         Number of bootstrap resamples
     samples : int
-        Number of samples in each resample. The default None sets samples to
+        Number of samples in each resample. The default `None` sets samples to
         the number of datapoints
     bootfunc : function
         Function to reduce the resampled data. Each bootstrap resample will
-        be put through this function and the results returned. If None, the
+        be put through this function and the results returned. If `None`, the
         bootstrapped data will be returned
 
     Returns
@@ -805,7 +836,7 @@ def bootstrap(data, bootnum=100, samples=None, bootfunc=None):
     if samples is None:
         samples = data.shape[0]
 
-    #make sure the input is sane
+    # make sure the input is sane
     assert samples > 0, "samples cannot be less than one"
     assert bootnum > 0, "bootnum cannot be less than one"
 
@@ -817,7 +848,7 @@ def bootstrap(data, bootnum=100, samples=None, bootfunc=None):
         boot = np.empty(resultdims)
 
     for i in xrange(bootnum):
-        bootarr = np.random.randint(low=0,high=data.shape[0],size=samples)
+        bootarr = np.random.randint(low=0, high=data.shape[0], size=samples)
         if bootfunc is None:
             boot[i] = data[bootarr]
         else:

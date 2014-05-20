@@ -8,6 +8,42 @@ lists issues that are too difficult to fix, may require some
 intervention from the user to workaround, or are due to bugs in other
 projects or packages.
 
+.. _quantity_issues:
+
+Quantities lose their units with some operations
+------------------------------------------------
+
+Quantities are subclassed from numpy's `~numpy.ndarray` and in some numpy operations
+(and in scipy operations using numpy internally) the subclass is ignored, which
+means that either a plain array is returned, or a `~astropy.units.quantity.Quantity` without units.
+E.g.::
+
+    In [1]: import astropy.units as u
+
+    In [2]: import numpy as np
+
+    In [3]: q = u.Quantity(np.arange(10.), u.m)
+
+    In [4]: np.dot(q,q)
+    Out[4]: 285.0
+
+    In [5]: np.hstack((q,q))
+    Out[5]: 
+    <Quantity [ 0., 1., 2., 3., 4., 5., 6., 7., 8., 9., 0., 1., 2., 3., 4.,
+                5., 6., 7., 8., 9.] (Unit not initialised)>
+
+Work-arounds are available for some cases.  For the above::
+
+    In [6]: q.dot(q)
+    Out[6]: <Quantity 285.0 m2>
+
+    In [7]: u.Quantity([q, q]).flatten()
+    Out[7]: 
+    <Quantity [ 0., 1., 2., 3., 4., 5., 6., 7., 8., 9., 0., 1., 2., 3., 4.,
+                5., 6., 7., 8., 9.] m>
+
+See: https://github.com/astropy/astropy/issues/1274
+
 Some docstrings can not be displayed in IPython < 0.13.2
 --------------------------------------------------------
 
@@ -21,8 +57,8 @@ some platforms in the IPython console (prior to IPython version
     ERROR: UnicodeEncodeError: 'ascii' codec can't encode character u'\xe5' in
     position 184: ordinal not in range(128) [IPython.core.page]
 
-This can be worked around by changing the default encoding to `utf-8`
-by adding the following to your `sitecustomize.py` file::
+This can be worked around by changing the default encoding to ``utf-8``
+by adding the following to your ``sitecustomize.py`` file::
 
     import sys
     sys.setdefaultencoding('utf-8')
@@ -107,7 +143,7 @@ Upgrading Astropy in the anaconda python distribution using ``pip`` can result
 in a corrupted install with a mix of files from the old version and the new
 version. Anaconda users should update with ``conda update astropy``. There
 may be a brief delay between the release of Astropy on PyPI and its release
-via the `conda` package manager; users can check the availability of new
+via the ``conda`` package manager; users can check the availability of new
 versions with ``conda search astropy``.
 
 Installation fails on Mageia-2 or Mageia-3 distributions
@@ -124,3 +160,39 @@ fix the issue, though an immediate workaround is to edit the file::
 
 and search for the line that adds the option ``-Wl,--no-undefined`` to the
 ``LDFLAGS`` variable and remove that option.
+
+
+Remote data utilities in `astropy.utils.data` fail on some Python distributions
+-------------------------------------------------------------------------------
+
+The remote data utilities in `astropy.utils.data` depend on the Python
+standard library `shelve` module, which in some cases depends on the
+standard library `bsddb` module. Some Python distributions, including but
+not limited to
+
+* OS X, Python 2.7.5 via homebrew
+* Linux, Python 2.7.6 via conda [#]_
+* Linux, Python 2.6.9 via conda
+
+are built without support for the ``bsddb`` module, resulting in an error
+such as::
+
+    ImportError: No module named _bsddb
+
+One workaround is to install the ``bsddb3`` module.
+
+.. [#] Continuum `says
+       <https://groups.google.com/a/continuum.io/forum/#!topic/anaconda/mCQL6fVx55A>`_
+       this will be fixed in their next Python build.
+
+
+Very long integers in ASCII tables silently converted to float for Numpy 1.5
+----------------------------------------------------------------------------
+
+For Numpy 1.5, when reading an ASCII table that has integers which are too
+large to fit into the native C long int type for the machine, then the
+values get converted to float type with no warning.  This is due to the
+behavior of `numpy.array` and cannot easily be worked around.  We recommend
+that users upgrade to a newer version of Numpy.  For Numpy >= 1.6 a warning
+is printed and the values are treated as strings to preserve all information.
+

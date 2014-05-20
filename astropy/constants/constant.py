@@ -11,11 +11,12 @@ from ..units.core import Unit, UnitsError
 from ..units.quantity import Quantity
 from ..utils import lazyproperty
 from ..utils.exceptions import AstropyUserWarning
+from ..utils.misc import InheritDocstrings
 
 __all__ = ['Constant', 'EMConstant']
 
 
-class ConstantMeta(type):
+class ConstantMeta(InheritDocstrings):
     """Metaclass for the :class:`Constant`. The primary purpose of this is to
     wrap the double-underscore methods of :class:`Quantity` which is the
     superclass of :class:`Constant`.
@@ -64,7 +65,7 @@ class ConstantMeta(type):
         exclude = set(['__new__', '__array_finalize__', '__array_wrap__',
                        '__dir__', '__getattr__', '__init__', '__str__',
                        '__repr__', '__hash__', '__iter__', '__getitem__',
-                       '__len__', '__nonzero__'])
+                       '__len__', '__nonzero__', '__quantity_subclass__'])
         for attr, value in list(six.iteritems(vars(Quantity))):
             if (isinstance(value, types.FunctionType) and
                     attr.startswith('__') and attr.endswith('__') and
@@ -131,6 +132,9 @@ class Constant(Quantity):
                                            self.uncertainty, self.unit,
                                            self.reference))
 
+    def __quantity_subclass__(self, unit):
+        return super(Constant, self).__quantity_subclass__(unit)[0], False
+
     @property
     def abbrev(self):
         """A typical ASCII text abbreviation of the constant, also generally
@@ -196,8 +200,8 @@ class EMConstant(Constant):
 
     @property
     def cgs(self):
-        """Overridden for EMConstant to raise a `TypeError` emphasizing that
-        there are multiple EM extensions to CGS.
+        """Overridden for EMConstant to raise a `~.exceptions.TypeError`
+        emphasizing that there are multiple EM extensions to CGS.
         """
 
         raise TypeError("Cannot convert EM constants to cgs because there "

@@ -2,35 +2,35 @@
 
 """
 This module provides wrappers, called Fitters, around some Numpy and Scipy
-fitting functions. All Fitters take an instance of `~astropy.modeling.core.ParametricModel`
-as input and define a ``__call__`` method which fits the model to the data and changes the
-model's parameters attribute. The idea is to make this extensible and allow
-users to easily add other fitters.
+fitting functions. All Fitters take an instance of
+`~astropy.modeling.FittableModel` as input and define a ``__call__`` method
+which fits the model to the data and changes the model's parameters
+attribute. The idea is to make this extensible and allow users to easily add
+other fitters.
 
-Linear fitting is done using Numpy's `~numpy.linalg.lstsq` function.
-There are currently two non-linear fitters which use `~scipy.optimize.leastsq` and
-`~scipy.optimize.slsqp` functions in scipy.optimize.\
+Linear fitting is done using the `numpy.linalg.lstsq` function.  There are
+currently two non-linear fitters which use `scipy.optimize.leastsq` and
+`scipy.optimize.slsqp` functions in `scipy.optimize`.
 """
 
-from __future__ import division
+from __future__ import (absolute_import, unicode_literals, division,
+                        print_function)
 
 import abc
-import numbers
 import warnings
 
 from functools import reduce
 
 import numpy as np
 
-from ..logger import log
 from .utils import poly_map_domain
 from ..utils.exceptions import AstropyUserWarning
-
+from .core import _CompositeModel
+from ..extern import six
 
 
 __all__ = ['LinearLSQFitter', 'NonLinearLSQFitter', 'SLSQPFitter',
            'JointFitter', 'Fitter']
-
 
 
 DEFAULT_MAXITER = 100
@@ -70,14 +70,13 @@ class UnsupportedConstraintError(ModelsError, ValueError):
     """
 
 
+@six.add_metaclass(abc.ABCMeta)
 class Fitter(object):
     """
     Base class for all fitters.
 
     The purpose of this class is to manage constraints.
     """
-
-    __metaclass__ = abc.ABCMeta
 
     # The base Fitter does not support any constraints by default; individual
     # fitters should explicitly set this list to the specific constraints
@@ -131,7 +130,7 @@ class Fitter(object):
         raise NotImplementedError("Subclasses should implement this")
 
     def _fitter_to_model_params(self, model, fps):
-        _fit_params, _fit_param_indices = model._model_to_fit_params()
+        _fit_params, _fit_param_indices = self._model_to_fit_params(model)
         if any(model.fixed.values()) or any(model.tied.values()):
             model.parameters[_fit_param_indices] = fps
             for idx, name in enumerate(model.param_names):
@@ -151,6 +150,30 @@ class Fitter(object):
         else:
             model.parameters = fps
 
+    @staticmethod
+    def _model_to_fit_params(model):
+        """
+        Convert a model instance's parameter array to an array that can be used
+        with a fitter that doesn't natively support fixed or tied parameters.
+        In particular, it removes fixed/tied parameters from the parameter
+        array.
+
+        These may be a subset of the model parameters, if some of them are held
+        constant or tied.
+        """
+
+        fitparam_indices = list(range(len(model.param_names)))
+        if any(model.fixed.values()) or any(model.tied.values()):
+            params = list(model.parameters)
+            for idx, name in list(enumerate(model.param_names))[::-1]:
+                if model.fixed[name] or model.tied[name]:
+                    sl = model._param_metrics[name][0]
+                    del params[sl]
+                    del fitparam_indices[idx]
+            return (np.array(params), fitparam_indices)
+        else:
+            return (model.parameters, fitparam_indices)
+
 
 class LinearLSQFitter(Fitter):
     """
@@ -162,7 +185,8 @@ class LinearLSQFitter(Fitter):
 
     Parameters
     ----------
-    model : an instance of `~astropy.modeling.core.ParametricModel`
+    model : `~astropy.modeling.FittableModel`
+        Model
 
     Raises
     ------
@@ -183,11 +207,11 @@ class LinearLSQFitter(Fitter):
     @staticmethod
     def _deriv_with_constraints(model, param_indices, x=None, y=None):
         if y is None:
-            d = np.array(model.deriv(x, *model.parameters))
+            d = np.array(model.fit_deriv(x, *model.parameters))
         else:
-            d = np.array(model.deriv(x, y, *model.parameters))
+            d = np.array(model.fit_deriv(x, y, *model.parameters))
 
-        if model.col_deriv:
+        if model.col_fit_deriv:
             return d[param_indices]
         else:
             return d[:, param_indices]
@@ -224,7 +248,7 @@ class LinearLSQFitter(Fitter):
 
         Parameters
         ----------
-        model : `ParametricModel`
+        model : `FittableModel`
             model to fit to x, y, z
         x : array
             input coordinates
@@ -241,11 +265,11 @@ class LinearLSQFitter(Fitter):
 
         Returns
         ------
-        model_copy : `ParametricModel`
+        model_copy : `FittableModel`
             a copy of the input model with parameters set by the fitter
         """
         if not model.fittable:
-            raise ValueError("Model must be a subclass of ParametricModel")
+            raise ValueError("Model must be a subclass of FittableModel")
         if not model.linear:
             raise ModelLinearityError('Model is not linear in parameters, '
                                       'linear fit methods should not be used.')
@@ -253,7 +277,7 @@ class LinearLSQFitter(Fitter):
         self._validate_constraints(model)
         multiple = False
         model_copy = model.copy()
-        _, fitparam_indices = model_copy._model_to_fit_params()
+        _, fitparam_indices = self._model_to_fit_params(model_copy)
         self._weights = weights
         if model_copy.n_inputs == 2 and z is None:
             raise ValueError("Expected x, y and z for a 2 dimensional model.")
@@ -263,9 +287,9 @@ class LinearLSQFitter(Fitter):
         if len(farg) == 2:
             x, y = farg
             if y.ndim == 2:
-                assert y.shape[1] == model_copy.param_dim, (
-                    "Number of data sets (Y array is expected to equal "
-                    "the number of parameter sets")
+                if y.shape[1] != model_copy.param_dim:
+                    raise ValueError("Number of data sets (Y array is expected"
+                                     " to equal the number of parameter sets")
             # map domain into window
             if hasattr(model_copy, 'domain'):
                 x = self._map_domain_window(model_copy, x)
@@ -274,7 +298,7 @@ class LinearLSQFitter(Fitter):
                                                    fitparam_indices,
                                                    x=x)
             else:
-                lhs = model_copy.deriv(x, *model_copy.parameters)
+                lhs = model_copy.fit_deriv(x, *model_copy.parameters)
             if len(y.shape) == 2:
                 rhs = y
                 multiple = y.shape[1]
@@ -293,14 +317,14 @@ class LinearLSQFitter(Fitter):
                 lhs = self._deriv_with_constraints(model_copy,
                                                    fitparam_indices, x=x, y=y)
             else:
-                lhs = model_copy.deriv(x, y, *model_copy.parameters)
+                lhs = model_copy.fit_deriv(x, y, *model_copy.parameters)
             if len(z.shape) == 3:
                 rhs = np.array([i.flatten() for i in z]).T
                 multiple = z.shape[0]
             else:
                 rhs = z.flatten()
         # If the derivative is defined along rows (as with non-linear models)
-        if model_copy.col_deriv:
+        if model_copy.col_fit_deriv:
             lhs = np.asarray(lhs).T
         if weights is not None:
             weights = np.asarray(weights, dtype=np.float)
@@ -349,21 +373,40 @@ class NonLinearLSQFitter(Fitter):
     A class performing non-linear least squares fitting using the
     Levenberg-Marquardt algorithm implemented in `scipy.optimize.leastsq`.
 
-    Parameters
+    Attributes
     ----------
-    model : a fittable `~astropy.modeling.core.ParametricModel`
-        model to fit to data
+    fit_info : dict
+        The `scipy.optimize.leastsq` result for the most recent fit (see notes).
+
 
     Raises
     ------
     ModelLinearityError
-        A linear model is passed to a nonlinear fitter
+        If a linear model is passed to a nonlinear fitter.
+
+    Notes
+    -----
+    The `fit_info` dictionary contains the values returned by
+    `scipy.optimize.leastsq` for the most recent fit, including the values
+    inside  the `infodict` dictionary. See the `scipy.optimize.leastsq`
+    documentation for details on the meaning of these values. Note that the `x`
+    return value is *not* included (as it is instead the parameter values of the
+    returned model).
+
+    Additionally, one additional element of `fit_info` is computed whenever a
+    model is fit, with the key 'param_cov'. The corresponding value is the
+    covariance matrix of the parameters as a 2D numpy array.  The order of the
+    matrix elements matches the order of the parameters in the fitted model
+    (i.e., the same order as ``model.param_names``).
+
     """
 
     supported_constraints = ['fixed', 'tied', 'bounds']
+    """
+    The valid constaints of this fitter class.
+    """
 
     def __init__(self):
-
         self.fit_info = {'nfev': None,
                          'fvec': None,
                          'fjac': None,
@@ -371,11 +414,27 @@ class NonLinearLSQFitter(Fitter):
                          'qtf': None,
                          'message': None,
                          'ierr': None,
-                         'status': None}
+                         'param_jac': None,
+                         'param_cov': None}
 
         super(NonLinearLSQFitter, self).__init__()
 
     def errorfunc(self, fps, *args):
+        """
+        Computes and returns the residuals of the model from the data.
+
+        Parameters
+        ----------
+        fps : list
+            parameters returned by the fitter
+        args : list
+            input coordinates
+
+        Returns
+        -------
+        res : array
+            1D array of residuals
+        """
         model = args[0]
         self._fitter_to_model_params(model, fps)
         meas = args[-1]
@@ -415,7 +474,7 @@ class NonLinearLSQFitter(Fitter):
 
         Parameters
         ----------
-        model : `ParametricModel`
+        model : `FittableModel`
             model to fit to x, y, z
         x : array
            input coordinates
@@ -434,17 +493,19 @@ class NonLinearLSQFitter(Fitter):
             assumed that the relative errors in the functions are
             of the order of the machine precision.
         estimate_jacobian : bool
-            If False (default) and if the model has a deriv method,
+            If False (default) and if the model has a fit_deriv method,
             it will be used. Otherwise the Jacobian will be estimated.
             If True, the Jacobian will be estimated in any case.
 
         Returns
         ------
-        model_copy : `ParametricModel`
+        model_copy : `FittableModel`
             a copy of the input model with parameters set by the fitter
         """
+        if isinstance(model, _CompositeModel):
+            raise NotImplementedError("Fitting of composite models is not implemented in astropy v.0.3.")
         if not model.fittable:
-            raise ValueError("Model must be a subclass of ParametricModel")
+            raise ValueError("Model must be a subclass of FittableModel")
         self._validate_constraints(model)
         from scipy import optimize
         model_copy = model.copy()
@@ -454,24 +515,33 @@ class NonLinearLSQFitter(Fitter):
             # only single data sets ca be fitted
             raise ValueError("NonLinearLSQFitter can only fit one "
                              "data set at a time")
-        if model_copy.deriv is None or estimate_jacobian:
+        if model_copy.fit_deriv is None or estimate_jacobian:
             dfunc = None
         else:
             dfunc = self._wrap_deriv
-        init_values, _ = model_copy._model_to_fit_params()
-        fitparams, status, dinfo, mess, ierr = optimize.leastsq(
+        init_values, _ = self._model_to_fit_params(model_copy)
+        fitparams, cov_x, dinfo, mess, ierr = optimize.leastsq(
             self.errorfunc, init_values, args=farg, Dfun=dfunc,
-            col_deriv=model_copy.col_deriv, maxfev=maxiter, epsfcn=epsilon,
+            col_deriv=model_copy.col_fit_deriv, maxfev=maxiter, epsfcn=epsilon,
             full_output=True)
         self._fitter_to_model_params(model_copy, fitparams)
         self.fit_info.update(dinfo)
-        self.fit_info['status'] = status
+        self.fit_info['cov_x'] = cov_x
         self.fit_info['message'] = mess
         self.fit_info['ierr'] = ierr
         if ierr not in [1, 2, 3, 4]:
             warnings.warn("The fit may be unsuccessful; check "
                           "fit_info['message'] for more information.",
                           AstropyUserWarning)
+
+        #now try to compute the true covariance matrix
+        if (len(y) > len(init_values)) and cov_x is not None:
+            sum_sqrs = np.sum(self.errorfunc(fitparams, *farg)**2)
+            dof = len(y) - len(init_values)
+            self.fit_info['param_cov'] = cov_x * sum_sqrs / dof
+        else:
+            self.fit_info['param_cov'] = None
+
         return model_copy
 
     @staticmethod
@@ -485,7 +555,7 @@ class NonLinearLSQFitter(Fitter):
         fitters using function derivative are added or when the statistic is
         separated from the fitting routines.
 
-        `~scipy.optimize.leastsq` expects the function derivative to have the
+        `scipy.optimize.leastsq` expects the function derivative to have the
         above signature (parlist, (argtuple)). In order to accomodate model
         constraints, instead of using p directly, we set the parameter list in
         this function.
@@ -493,9 +563,9 @@ class NonLinearLSQFitter(Fitter):
         if any(model.fixed.values()) or any(model.tied.values()):
 
             if z is None:
-                full_deriv = np.array(model.deriv(x, *model.parameters))
+                full_deriv = np.array(model.fit_deriv(x, *model.parameters))
             else:
-                full_deriv = np.array(model.deriv(x, y, *model.parameters))
+                full_deriv = np.array(model.fit_deriv(x, y, *model.parameters))
 
             pars = [getattr(model, name) for name in model.param_names]
             fixed = [par.fixed for par in pars]
@@ -504,7 +574,7 @@ class NonLinearLSQFitter(Fitter):
             fix_and_tie = np.logical_or(fixed, tied)
             ind = np.logical_not(fix_and_tie)
 
-            if not model.col_deriv:
+            if not model.col_fit_deriv:
                 full_deriv = np.asarray(full_deriv).T
                 residues = np.asarray(full_deriv[np.nonzero(ind)])
             else:
@@ -513,9 +583,9 @@ class NonLinearLSQFitter(Fitter):
             return [np.ravel(_) for _ in residues]
         else:
             if z is None:
-                return model.deriv(x, *params)
+                return model.fit_deriv(x, *params)
             else:
-                return [np.ravel(_) for _ in model.deriv(x, y, *params)]
+                return [np.ravel(_) for _ in model.fit_deriv(x, y, *params)]
 
 
 class SLSQPFitter(Fitter):
@@ -575,7 +645,7 @@ class SLSQPFitter(Fitter):
 
         Parameters
         ----------
-        model : `ParametricModel`
+        model : `FittableModel`
             model to fit to x, y, z
         x : array
             input coordinates
@@ -596,11 +666,13 @@ class SLSQPFitter(Fitter):
 
         Returns
         ------
-        model_copy : `ParametricModel`
+        model_copy : `FittableModel`
             a copy of the input model with parameters set by the fitter
         """
+        if isinstance(model, _CompositeModel):
+            raise NotImplementedError("Fitting of composite models is not implemented in astropy v.0.3.")
         if not model.fittable:
-            raise ValueError("Model must be a subclass of ParametricModel")
+            raise ValueError("Model must be a subclass of FittableModel")
         if model.linear:
             warnings.warn('Model is linear in parameters; '
                           'consider using linear fitting methods.',
@@ -617,7 +689,7 @@ class SLSQPFitter(Fitter):
             raise ValueError("NonLinearLSQFitter can only fit "
                              "one data set at a time")
 
-        p0, param_indices = model_copy._model_to_fit_params()
+        p0, param_indices = self._model_to_fit_params(model_copy)
         pars = [getattr(model_copy, name) for name in model_copy.param_names]
         bounds = [par.bounds for par in pars if par.fixed != True and par.tied == False]
 
@@ -672,8 +744,6 @@ class JointFitter(object):
         self.initvals = list(initvals)
         self.jointparams = jointparameters
         self._verify_input()
-        for m in self.jointparams.keys():
-            m.set_joint_parameters(self.jointparams[m])
         self.fitparams = self._model_to_fit_params()
 
         # a list of model.n_inputs
@@ -686,8 +756,9 @@ class JointFitter(object):
         fparams.extend(self.initvals)
         for model in self.models:
             params = [p.flatten() for p in model.parameters]
-            for pname in model.joint:
-                slc = model._param_metrics[pname][0]
+            joint_params = self.jointparams[model]
+            for param_name in joint_params:
+                slc = model._param_metrics[param_name][0]
                 del params[slc]
             fparams.extend(params)
         return fparams
@@ -711,23 +782,24 @@ class JointFitter(object):
         del fitparams[:numjp]
 
         for model in self.models:
+            joint_params = self.jointparams[model]
             margs = lstsqargs[:model.n_inputs + 1]
             del lstsqargs[:model.n_inputs + 1]
             # separate each model separately fitted parameters
-            numfp = len(model._parameters) - len(model.joint)
+            numfp = len(model._parameters) - len(joint_params)
             mfparams = fitparams[:numfp]
 
             del fitparams[:numfp]
             # recreate the model parameters
             mparams = []
-            for pname in model.param_names:
-                if pname in model.joint:
-                    index = model.joint.index(pname)
+            for param_name in model.param_names:
+                if param_name in joint_params:
+                    index = joint_params.index(param_name)
                     # should do this with slices in case the
                     # parameter is not a number
                     mparams.extend([jointfitparams[index]])
                 else:
-                    slc = model._param_metrics[pname][0]
+                    slc = model._param_metrics[param_name][0]
                     plen = slc.stop - slc.start
                     mparams.extend(mfparams[:plen])
                     del mfparams[:plen]
@@ -736,10 +808,16 @@ class JointFitter(object):
         return np.ravel(fitted)
 
     def _verify_input(self):
-        assert(len(self.models) > 1)
-        assert(len(self.jointparams.keys()) >= 2)
+        if len(self.models) <= 1:
+            raise TypeError("Expected >1 models, %d is given" %
+                            len(self.models))
+        if len(self.jointparams.keys()) < 2:
+            raise TypeError("At least two parameters are expected, "
+                            "%d is given" % len(self.jointparams.keys()))
         for j in self.jointparams.keys():
-            assert(len(self.jointparams[j]) == len(self.initvals))
+            if len(self.jointparams[j]) != len(self.initvals):
+                raise TypeError("%d parameter(s) provided but %d expected" %
+                                (len(self.jointparams[j]), len(self.initvals)))
 
     def __call__(self, *args):
         """
@@ -749,9 +827,12 @@ class JointFitter(object):
 
         from scipy import optimize
 
-        assert(len(args) == reduce(lambda x, y: x + 1 + y + 1, self.modeldims))
+        if len(args) != reduce(lambda x, y: x + 1 + y + 1, self.modeldims):
+            raise ValueError("Expected %d coordinates in args but %d provided"
+                             % (reduce(lambda x, y: x + 1 + y + 1,
+                                       self.modeldims), len(args)))
         self.fitparams[:], _ = optimize.leastsq(self.errorfunc, self.fitparams,
-                                              args=args)
+                                                args=args)
 
         fparams = self.fitparams[:]
         numjp = len(self.initvals)
@@ -761,20 +842,21 @@ class JointFitter(object):
 
         for model in self.models:
             # extract each model's fitted parameters
-            numfp = len(model._parameters) - len(model.joint)
+            joint_params = self.jointparams[model]
+            numfp = len(model._parameters) - len(joint_params)
             mfparams = fparams[:numfp]
 
             del fparams[:numfp]
             # recreate the model parameters
             mparams = []
-            for pname in model.param_names:
-                if pname in model.joint:
-                    index = model.joint.index(pname)
+            for param_name in model.param_names:
+                if param_name in joint_params:
+                    index = joint_params.index(param_name)
                     # should do this with slices in case the parameter
                     # is not a number
                     mparams.extend([jointfitparams[index]])
                 else:
-                    slc = model._param_metrics[pname][0]
+                    slc = model._param_metrics[param_name][0]
                     plen = slc.stop - slc.start
                     mparams.extend(mfparams[:plen])
                     del mfparams[:plen]

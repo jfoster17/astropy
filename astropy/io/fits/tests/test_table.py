@@ -1,8 +1,11 @@
 # Licensed under a 3-clause BSD style license - see PYFITS.rst
+from __future__ import print_function
 
 import numpy as np
 from numpy import char as chararray
 
+from ....extern.six.moves import range
+from ....extern.six.moves import cPickle as pickle
 from ....io import fits
 from ....tests.helper import pytest
 
@@ -52,7 +55,7 @@ def comparerecords(a, b):
     nfieldsa = len(a.dtype.names)
     nfieldsb = len(b.dtype.names)
     if nfieldsa != nfieldsb:
-        print "number of fields don't match"
+        print("number of fields don't match")
         return False
     for i in range(nfieldsa):
         fielda = a.field(i)
@@ -64,28 +67,28 @@ def comparerecords(a, b):
         if (type(fielda) != type(fieldb) and not
             (issubclass(type(fielda), type(fieldb)) or
              issubclass(type(fieldb), type(fielda)))):
-            print "type(fielda): ", type(fielda), " fielda: ", fielda
-            print "type(fieldb): ", type(fieldb), " fieldb: ", fieldb
-            print 'field %d type differs' % i
+            print("type(fielda): ", type(fielda), " fielda: ", fielda)
+            print("type(fieldb): ", type(fieldb), " fieldb: ", fieldb)
+            print('field {0} type differs'.format(i))
             return False
         if isinstance(fielda[0], np.floating):
             if not comparefloats(fielda, fieldb):
-                print "fielda: ", fielda
-                print "fieldb: ", fieldb
-                print 'field %d differs' % i
+                print("fielda: ", fielda)
+                print("fieldb: ", fieldb)
+                print('field {0} differs'.format(i))
                 return False
         elif (isinstance(fielda, fits.column._VLF) or
               isinstance(fieldb, fits.column._VLF)):
             for row in range(len(fielda)):
                 if np.any(fielda[row] != fieldb[row]):
-                    print 'fielda[%d]: %s' % (row, fielda[row])
-                    print 'fieldb[%d]: %s' % (row, fieldb[row])
-                    print 'field %d differs in row %d' % (i, row)
+                    print('fielda[{0}]: {1}'.format(row, fielda[row]))
+                    print('fieldb[{0}]: {1}'.format(row, fieldb[row]))
+                    print('field {0} differs in row {1}'.format(i, row))
         else:
             if np.any(fielda != fieldb):
-                print "fielda: ", fielda
-                print "fieldb: ", fieldb
-                print 'field %d differs' % i
+                print("fielda: ", fielda)
+                print("fieldb: ", fieldb)
+                print('field {0} differs'.format(i))
                 return False
     return True
 
@@ -1425,7 +1428,7 @@ class TestTableFunctions(FitsTestCase):
 
         i = 0
         for row in tbhdu1.data:
-            for j in xrange(len(row)):
+            for j in range(len(row)):
                 if isinstance(row[j], np.ndarray):
                     assert (row[j] == tbhdu.data[i][j]).all()
                 else:
@@ -1969,6 +1972,23 @@ class TestTableFunctions(FitsTestCase):
         assert (s2 == s3).all()
         assert (s3 == s4).all()
 
+    def test_array_broadcasting(self):
+        """
+        Regression test for https://github.com/spacetelescope/PyFITS/pull/48
+        """
+
+        with fits.open(self.data('table.fits')) as hdu:
+            data = hdu[1].data
+            data['V_mag'] = 0
+            assert np.all(data['V_mag'] == 0)
+
+            data['V_mag'] = 1
+            assert np.all(data['V_mag'] == 1)
+
+            for container in (list, tuple, np.array):
+                data['V_mag'] = container([1, 2, 3])
+                assert np.array_equal(data['V_mag'], np.array([1, 2, 3]))
+
     def test_array_slicing_readonly(self):
         """
         Like test_array_slicing but with the file opened in 'readonly' mode.
@@ -2006,6 +2026,28 @@ class TestTableFunctions(FitsTestCase):
         assert comparerecords(tbhdu.data, new_tbhdu.data)
 
         # Double check that the headers are equivalent
+        assert str(tbhdu.header) == str(new_tbhdu.header)
+
+    def test_dump_load_array_colums(self):
+        """
+        Regression test for https://github.com/spacetelescope/PyFITS/issues/22
+
+        Ensures that a table containing a multi-value array column can be
+        dumped and loaded successfully.
+        """
+
+        data = np.rec.array([('a', [1, 2, 3, 4], 0.1),
+                             ('b', [5, 6, 7, 8], 0.2)],
+                            formats='a1,4i4,f8')
+        data = fits.FITS_rec.from_columns(data)
+        tbhdu = fits.BinTableHDU(data=data)
+        datafile = self.temp('data.txt')
+        cdfile = self.temp('coldefs.txt')
+        hfile = self.temp('header.txt')
+
+        tbhdu.dump(datafile, cdfile, hfile)
+        new_tbhdu = fits.BinTableHDU.load(datafile, cdfile, hfile)
+        assert comparerecords(tbhdu.data, new_tbhdu.data)
         assert str(tbhdu.header) == str(new_tbhdu.header)
 
     def test_load_guess_format(self):
@@ -2256,3 +2298,130 @@ class TestTableFunctions(FitsTestCase):
                 # columns to convert these to columns of 'T'/'F' strings
                 assert np.all(np.where(tbdata['c4'] == True, 'T', 'F') ==
                               tbdata2['c4'])
+
+    def test_pickle(self):
+        """
+        Regression test for https://github.com/astropy/astropy/issues/1597
+
+        Tests for pickling FITS_rec objects
+        """
+
+        # open existing FITS tables (images pickle by default, no test needed):
+        with fits.open(self.data('tb.fits')) as btb:
+            # Test column array is delayed and can pickle
+            assert isinstance(btb[1].columns._arrays[0], Delayed)
+
+            btb_pd = pickle.dumps(btb[1].data)
+            btb_pl = pickle.loads(btb_pd)
+
+            # It should not be delayed any more
+            assert not isinstance(btb[1].columns._arrays[0], Delayed)
+
+            assert comparerecords(btb_pl, btb[1].data)
+
+        with fits.open(self.data('ascii.fits')) as asc:
+            asc_pd = pickle.dumps(asc[1].data)
+            asc_pl = pickle.loads(asc_pd)
+            assert comparerecords(asc_pl, asc[1].data)
+
+        with fits.open(self.data('random_groups.fits')) as rgr:
+            rgr_pd = pickle.dumps(rgr[0].data)
+            rgr_pl = pickle.loads(rgr_pd)
+            assert comparerecords(rgr_pl, rgr[0].data)
+
+        with fits.open(self.data('zerowidth.fits')) as zwc:
+            # Doesn't pickle zero-width (_phanotm) column 'ORBPARM'
+            zwc_pd = pickle.dumps(zwc[2].data)
+            zwc_pl = pickle.loads(zwc_pd)
+            assert comparerecords(zwc_pl, zwc[2].data)
+
+    def test_copy_vla(self):
+        """
+        Regression test for https://github.com/spacetelescope/PyFITS/issues/47
+        """
+
+        # Make a file containing a couple of VLA tables
+        arr1 = [np.arange(n + 1) for n in range(255)]
+        arr2 = [np.arange(255, 256 + n) for n in range(255)]
+
+        # A dummy non-VLA column needed to reproduce issue #47
+        c = fits.Column('test', format='J', array=np.arange(255))
+        t1 = fits.new_table([c, fits.Column('A', format='PJ', array=arr1)])
+        t2 = fits.new_table([c, fits.Column('B', format='PJ', array=arr2)])
+
+        hdul = fits.HDUList([fits.PrimaryHDU(), t1, t2])
+        hdul.writeto(self.temp('test.fits'), clobber=True)
+
+        # Just test that the test file wrote out correctly
+        with fits.open(self.temp('test.fits')) as h:
+            assert h[1].header['TFORM2'] == 'PJ(255)'
+            assert h[2].header['TFORM2'] == 'PJ(255)'
+            assert comparerecords(h[1].data, t1.data)
+            assert comparerecords(h[2].data, t2.data)
+
+        # Try copying the second VLA and writing to a new file
+        with fits.open(self.temp('test.fits')) as h:
+            new_hdu = fits.BinTableHDU(data=h[2].data, header=h[2].header)
+            new_hdu.writeto(self.temp('test3.fits'))
+
+        with fits.open(self.temp('test3.fits')) as h2:
+            assert comparerecords(h2[1].data, t2.data)
+
+        new_hdul = fits.HDUList([fits.PrimaryHDU()])
+        new_hdul.writeto(self.temp('test2.fits'))
+
+        # Open several copies of the test file and append copies of the second
+        # VLA table
+        with fits.open(self.temp('test2.fits'), mode='append') as new_hdul:
+            for _ in range(2):
+                with fits.open(self.temp('test.fits')) as h:
+                    new_hdul.append(h[2])
+                    new_hdul.flush()
+
+        # Test that all the VLA copies wrote correctly
+        with fits.open(self.temp('test2.fits')) as new_hdul:
+            for idx in range(1, 3):
+                assert comparerecords(new_hdul[idx].data, t2.data)
+
+    def test_new_coldefs_with_invalid_seqence(self):
+        """Test that a TypeError is raised when a ColDefs is instantiated with
+        a sequence of non-Column objects.
+        """
+
+        pytest.raises(TypeError, fits.ColDefs, [1, 2, 3])
+
+    def test_pickle(self):
+        """
+        Regression test for https://github.com/astropy/astropy/issues/1597
+
+        Tests for pickling FITS_rec objects
+        """
+
+        # open existing FITS tables (images pickle by default, no test needed):
+        with fits.open(self.data('tb.fits')) as btb:
+            # Test column array is delayed and can pickle
+            assert isinstance(btb[1].columns._arrays[0], Delayed)
+
+            btb_pd = pickle.dumps(btb[1].data)
+            btb_pl = pickle.loads(btb_pd)
+
+            # It should not be delayed any more
+            assert not isinstance(btb[1].columns._arrays[0], Delayed)
+
+            assert comparerecords(btb_pl, btb[1].data)
+
+        with fits.open(self.data('ascii.fits')) as asc:
+            asc_pd = pickle.dumps(asc[1].data)
+            asc_pl = pickle.loads(asc_pd)
+            assert comparerecords(asc_pl, asc[1].data)
+
+        with fits.open(self.data('random_groups.fits')) as rgr:
+            rgr_pd = pickle.dumps(rgr[0].data)
+            rgr_pl = pickle.loads(rgr_pd)
+            assert comparerecords(rgr_pl, rgr[0].data)
+
+        with fits.open(self.data('zerowidth.fits')) as zwc:
+            # Doesn't pickle zero-width (_phanotm) column 'ORBPARM'
+            zwc_pd = pickle.dumps(zwc[2].data)
+            zwc_pl = pickle.loads(zwc_pd)
+            assert comparerecords(zwc_pl, zwc[2].data)

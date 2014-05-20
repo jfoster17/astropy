@@ -1,19 +1,19 @@
 # coding: utf-8
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-"""
-Separate tests specifically for equivalencies
-"""
+"""Separate tests specifically for equivalencies."""
 
 from __future__ import (absolute_import, unicode_literals, division,
                         print_function)
 
+from ...extern.six.moves import zip
+
+# THIRD-PARTY
 import numpy as np
 from numpy.testing.utils import assert_allclose
 
-from ...tests.helper import pytest
-
-from ...extern.six.moves import zip
+# LOCAL
 from ... import units as u
+from ...tests.helper import pytest
 
 
 def test_dimensionless_angles():
@@ -43,6 +43,31 @@ def test_dimensionless_angles():
 
     phase = MyRad1(1., u.cycle)
     assert phase.to(1).value == u.cycle.to(u.radian)
+
+
+@pytest.mark.parametrize('log_unit', (u.mag, u.dex, u.dB))
+def test_logarithmic(log_unit):
+    # check conversion of mag, dB, and dex to dimensionless and vice versa
+    with pytest.raises(u.UnitsError):
+        log_unit.to(1, 0.)
+    with pytest.raises(u.UnitsError):
+        u.dimensionless_unscaled.to(log_unit)
+
+    assert log_unit.to(1, 0., equivalencies=u.logarithmic()) == 1.
+    assert u.dimensionless_unscaled.to(log_unit,
+                                       equivalencies=u.logarithmic()) == 0.
+    # also try with quantities
+
+    q_dex = np.array([0., -1., 1., 2.]) * u.dex
+    q_expected = 10.**q_dex.value * u.dimensionless_unscaled
+    q_log_unit = q_dex.to(log_unit)
+    assert np.all(q_log_unit.to(1, equivalencies=u.logarithmic()) ==
+                  q_expected)
+    assert np.all(q_expected.to(log_unit, equivalencies=u.logarithmic()) ==
+                  q_log_unit)
+    with u.set_enabled_equivalencies(u.logarithmic()):
+        assert np.all(np.abs(q_log_unit - q_expected.to(log_unit)) <
+                      1.e-10*log_unit)
 
 
 functions = [u.doppler_optical, u.doppler_radio, u.doppler_relativistic]
@@ -107,6 +132,7 @@ def test_30kms(function, value):
     shifted = velo.to(u.GHz, equivalencies=function(rest))
     np.testing.assert_almost_equal(shifted.value, value, decimal=7)
 
+
 def test_massenergy():
     # The relative tolerance of these tests is set by the uncertainties
     # in the charge of the electron, which is known to about
@@ -159,6 +185,7 @@ def test_massenergy():
                                   equivalencies=u.mass_energy()).value,
                        pow_eV.value, rtol=1e-7)
 
+
 def test_is_equivalent():
     assert u.m.is_equivalent(u.pc)
     assert u.cycle.is_equivalent(u.mas)
@@ -177,6 +204,7 @@ def test_is_equivalent():
     assert u.g.is_equivalent((u.m, u.s, u.kg))
     assert not u.L.is_equivalent((u.m, u.s, u.kg))
     assert not (u.km / u.s).is_equivalent((u.m, u.s, u.kg))
+
 
 def test_parallax():
     a = u.arcsecond.to(u.pc, 10, u.parallax())
@@ -235,17 +263,23 @@ def test_spectral3():
 @pytest.mark.parametrize(
     ('in_val', 'in_unit'),
     [([0.1, 5000.0, 10000.0], u.AA),
+     ([1e+5, 2.0, 1.0], u.micron ** -1),
      ([2.99792458e+19, 5.99584916e+14, 2.99792458e+14], u.Hz),
      ([1.98644568e-14, 3.97289137e-19, 1.98644568e-19], u.J)])
 def test_spectral4(in_val, in_unit):
     """Wave number conversion w.r.t. wavelength, freq, and energy."""
-    # Forward
-    a = in_unit.to(u.micron ** -1, in_val, u.spectral())
-    assert_allclose(a, [1e+5, 2.0, 1.0])
+    # Spectroscopic and angular
+    out_units = [u.micron ** -1, u.radian / u.micron]
+    answers = [[1e+5, 2.0, 1.0], [6.28318531e+05, 12.5663706, 6.28318531]]
 
-    # Backward
-    b = (u.micron ** -1).to(in_unit, [1e+5, 2.0, 1.0], u.spectral())
-    assert_allclose(b, in_val)
+    for out_unit, ans in zip(out_units, answers):
+        # Forward
+        a = in_unit.to(out_unit, in_val, u.spectral())
+        assert_allclose(a, ans)
+
+        # Backward
+        b = out_unit.to(in_unit, ans, u.spectral())
+        assert_allclose(b, in_val)
 
 
 def test_spectraldensity():
@@ -404,7 +438,7 @@ def test_invalid_equivalency():
 
 
 def test_irrelevant_equivalency():
-    with pytest.raises(u.UnitsException):
+    with pytest.raises(u.UnitsError):
         u.m.to(u.kg, equivalencies=[(u.m, u.l)])
 
 
@@ -474,3 +508,10 @@ def test_equivalency_context_manager():
                     set(base_registry.all_units))
 
     assert base_registry is u.get_current_unit_registry()
+
+
+def test_temperature():
+    from ..imperial import deg_F
+    t_k = 0 * u.K
+    assert_allclose(t_k.to(u.deg_C, u.temperature()).value, -273.15)
+    assert_allclose(t_k.to(deg_F, u.temperature()).value, -459.67)

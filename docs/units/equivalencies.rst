@@ -1,4 +1,4 @@
-.. |quantity| replace:: :class:`~astropy.units.quantity.Quantity`
+.. |quantity| replace:: :class:`~astropy.units.Quantity`
 
 .. _unit_equivalencies:
 
@@ -16,7 +16,7 @@ equivalencies included in `astropy.units` and then describe how to
 define new equivalencies.
 
 Equivalencies are used by passing a list of equivalency pairs to the
-`equivalencies` keyword argument of :meth:`Quantity.to
+``equivalencies`` keyword argument of :meth:`Quantity.to
 <astropy.units.quantity.Quantity.to>`, :meth:`Unit.to
 <astropy.units.core.UnitBase.to>` or :meth:`Unit.get_converter
 <astropy.units.core.UnitBase.get_converter>` methods.
@@ -94,16 +94,6 @@ option to :ref:`set default equivalencies <equivalency-context>`.
 
 Spectral Units
 ^^^^^^^^^^^^^^
-
-:func:`~astropy.units.equivalencies.spectral` is a function that returns an
-equivalency list to handle conversions between wavelength, frequency
-and energy.
-
-As mentioned above with parallax units, we simply pass the proper
-conversion function (in this case
-:meth:`~astropy.units.equivalencies.spectral`) as the third argument to the
-:meth:`~astropy.units.core.UnitBase.to` method and wavelength, frequency
-and energy can be converted.
 
 :func:`~astropy.units.equivalencies.spectral` is a function that returns
 an equivalency list to handle conversions between wavelength,
@@ -200,8 +190,8 @@ elements::
 
   (from_unit, to_unit, forward, backward)
 
-`from_unit` and `to_unit` are the equivalent units.  `forward` and
-`backward` are functions that convert values between those units.
+``from_unit`` and ``to_unit`` are the equivalent units.  ``forward`` and
+``backward`` are functions that convert values between those units.
 
 For example, until 1964 the metric liter was defined as the volume of
 1kg of water at 4°C at 760mm mercury pressure.  Volumes and masses are
@@ -253,9 +243,9 @@ of ``c`` is used instead of the constant.
 Displaying available equivalencies
 ----------------------------------
 
-The :meth:`~astropy.units.core.Unit.find_equivalent_units` method also
+The :meth:`~astropy.units.core.UnitBase.find_equivalent_units` method also
 understands equivalencies.  For example, without passing equivalencies,
-there are three compatible units for `Hz` in the standard set::
+there are three compatible units for ``Hz`` in the standard set::
 
   >>> u.Hz.find_equivalent_units()
     Primary name | Unit definition | Aliases

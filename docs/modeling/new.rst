@@ -5,14 +5,14 @@ Defining New Model Classes
 This document describes how to add a model to the package or to create a
 user-defined model. In short, one needs to define all model parameters and
 write an eval function which evaluates the model.  If the model is fittable, a
-function to compute the derivatives is required if a linear fitting algorithm
-is to be used and optional if a non-linear fitter is to be used.
+function to compute the derivatives with respect to parapemeters is required
+if a linear fitting algorithm is to be used and optional if a non-linear fitter is to be used.
 
 
 Custom 1D models
 ----------------
 
-For 1D models, the `~astropy.modeling.functional_models.custom_model_1d`
+For 1D models, the `~astropy.modeling.models.custom_model_1d`
 decorator is provided to make it very easy to define new models. The following
 example demonstrates how to set up a model consisting of two Gaussians:
 
@@ -53,35 +53,38 @@ The example described in `Custom 1D models`_ can be used for most 1D cases, but
 the following section described how to construct model classes in general.
 The details are explained below with a 1D Gaussian model as an example.  There
 are two base classes for models. If the model is fittable, it should inherit
-from `~astropy.modeling.core.ParametricModel`; if not it should subclass
-`~astropy.modeling.core.Model`.
+from `~astropy.modeling.FittableModel`; if not it should subclass
+`~astropy.modeling.Model`.
 
 If the model takes parameters they should be specified as class attributes in
-the model's class definition using the `~astropy.modeling.parameters.Parameter`
-descriptor.  The first argument for defining the parameter must be a unique (
-to that model) name of the parameter, and it must be identical to the class
-attribute being assigned that parameter.  Subsequent arguments are optional,
-and may include a default value for that parameter as well default constraints
-and custom getters/setters for the parameter value.
+the model's class definition using the `~astropy.modeling.Parameter`
+descriptor.  All arguments to the Parameter constructor are optional, and may
+include a default value for that parameter as well default constraints and
+custom getters/setters for the parameter value.  If the first argument ``name``
+is specified it must be identical to the class attribute being assigned that
+Parameter.  As such, Parameters take their name from this attribute by default.
+In other words, ``amplitude = Parameter('amplitude')`` is equivalent to
+``amplitude = Parameter()``.  This differs from Astropy v0.3.x, where it was
+necessary to provide the name twice.
 
 .. note::
 
     If the method which evaluates the model cannot work with multiple parameter
-    sets, `~astropy.modeling.core.Model.param_dim` should not be given as an
+    sets, `~astropy.modeling.Model.param_dim` should not be given as an
     argument in the ``__init__`` method. The default for
-    `~astropy.modeling.core.Model.param_dim` is set in the base class to 1.
+    `~astropy.modeling.Model.param_dim` is set in the base class to 1.
 
 ::
 
     from astropy.modeling import *
 
-    class Gaussian1DModel(ParametricModel):
-        amplitude = Parameter('amplitude')
-        mean = Parameter('mean')
-        stddev = Parameter('stddev')
+    class Gaussian1DModel(FittableModel):
+        amplitude = Parameter()
+        mean = Parameter()
+        stddev = Parameter()
 
 At a minimum, the ``__init__`` method takes all parameters and the number of
-parameter sets, `~astropy.modeling.core.Model.param_dim`::
+parameter sets, `~astropy.modeling.Model.param_dim`::
 
     def __init__(self, amplitude, mean, stddev, param_dim=1, **constraints):
         # Note that this __init__ does nothing different from the base class's
@@ -98,30 +101,32 @@ parameter sets, `~astropy.modeling.core.Model.param_dim`::
     recommended to make it a required argument.  In the above example none of
     the parameters have default values.
 
-Parametric models can be linear or nonlinear in a regression sense. The default
-value of the `~astropy.modeling.core.Model.linear` attribute is ``True``.
+Fittable models can be linear or nonlinear in a regression sense. The default
+value of the `~astropy.modeling.Model.linear` attribute is ``True``.
 Nonlinear models should define the ``linear`` class attribute as ``False``.
-The `~astropy.modeling.core.Model.n_inputs` attribute stores the number of
+The `~astropy.modeling.Model.n_inputs` attribute stores the number of
 input variables the model expects.  The
-`~astropy.modeling.core.Model.n_outputs` attribute stores the number of output
+`~astropy.modeling.Model.n_outputs` attribute stores the number of output
 variables returned after evaluating the model.  These two attributes are used
 with composite models.
 
 Next, provide a `staticmethod`, called ``eval`` to evaluate the model and a
-`staticmethod`, called ``deriv``,  to compute its derivatives. The evaluation
-method takes all input coordinates as separate arguments and a parameter set.
+`staticmethod`, called ``fit_deriv``,  to compute its derivatives with respect
+to parameters. The evaluation method takes all input coordinates as separate
+arguments and a parameter set.
+
 For this example::
 
     @staticmethod
     def eval(x, amplitude, mean, stddev):
         return amplitude * np.exp((-(1 / (2. * stddev**2)) * (x - mean)**2))
 
-The ``deriv`` method takes as input all coordinates as separate arguments.
+The ``fit_deriv`` method takes as input all coordinates as separate arguments.
 There is an option to compute numerical derivatives for nonlinear models in
-which case the ``deriv`` method should be ``None``::
+which case the ``fit_deriv`` method should be ``None``::
 
     @staticmethod
-    def deriv(x, ampltidue, mean, stddev):
+    def fit_deriv(x, ampltidue, mean, stddev):
         d_amplitude = np.exp((-(1 / (stddev**2)) * (x - mean)**2))
         d_mean = (2 * amplitude *
                   np.exp((-(1 / (stddev**2)) * (x - mean)**2)) *
@@ -134,14 +139,14 @@ which case the ``deriv`` method should be ``None``::
 .. note::
 
     It's not strictly required that these be staticmethods if the ``eval`` or
-    ``deriv`` functions somehow depend on an attribute of the model class or
+    ``fit_deriv`` functions somehow depend on an attribute of the model class or
     instance.  But in most cases they simple functions for evaluating the
     model with the given inputs and parameters.
 
 
 Finally, the ``__call__`` method takes input coordinates as separate arguments.
 It reformats them (if necessary) using the
-`~astropy.modeling.core.format_input` wrapper/decorator and calls the eval
+`~astropy.modeling.format_input` wrapper/decorator and calls the eval
 method to perform the model evaluation using ``model.param_sets`` as
 parameters.  The reason there is a separate eval method is to allow fitters to
 call the eval method with different parameters which is necessary for fitting
@@ -161,8 +166,8 @@ A full example of a LineModel
     import numpy as np
 
     class LineModel(models.PolynomialModel):
-        slope = Parameter('slope')
-        intercept = Parameter('intercept')
+        slope = Parameter()
+        intercept = Parameter()
         linear = True
 
     def __init__(self, slope, intercept, param_dim=1, **constraints):
@@ -177,7 +182,7 @@ A full example of a LineModel
         return slope * x + intercept
 
     @staticmethod
-    def deriv(x, slope, intercept):
+    def fit_deriv(x, slope, intercept):
         d_slope = x
         d_intercept = np.ones_like(x)
         return [d_slope, d_intercept]

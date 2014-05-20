@@ -5,12 +5,17 @@ into conftest.py in the root directory.
 """
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
+
+import __future__
+
 from ..extern import six
 from ..extern.six.moves import filter
 
+import ast
 import doctest
 import fnmatch
 import imp
+import io
 import locale
 import math
 import os
@@ -19,9 +24,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import warnings
+import types
 
-from .helper import pytest
+from .helper import pytest, treat_deprecations_as_exceptions
+from .disable_internet import turn_off_internet, turn_on_internet
 
 # these pytest hooks allow us to mark tests and run the marked tests with
 # specific command line options.
@@ -67,15 +73,24 @@ class OutputCheckerFix(doctest.OutputChecker):
         r"(\W|^)[uU]([rR]?[\'\"])", re.UNICODE)
     _remove_byteorder = re.compile(
         r"([\'\"])[|<>]([biufcSaUV][0-9]+)([\'\"])", re.UNICODE)
+    _fix_32bit = re.compile(
+        r"([\'\"])([iu])[48]([\'\"])", re.UNICODE)
+    _ignore_long_int = re.compile(
+        r"([0-9]+)L", re.UNICODE)
 
     _original_output_checker = doctest.OutputChecker
 
     def do_fixes(self, want, got):
         want = re.sub(self._literal_re, r'\1\2', want)
         want = re.sub(self._remove_byteorder, r'\1\2\3', want)
+        want = re.sub(self._fix_32bit, r'\1\2\3', want)
+        want = re.sub(self._ignore_long_int, r'\1', want)
 
         got = re.sub(self._literal_re, r'\1\2', got)
         got = re.sub(self._remove_byteorder, r'\1\2\3', got)
+        got = re.sub(self._fix_32bit, r'\1\2\3', got)
+        got = re.sub(self._ignore_long_int, r'\1', got)
+
         return want, got
 
     def check_output(self, want, got, flags):
@@ -106,6 +121,13 @@ REMOTE_DATA = doctest.register_optionflag('REMOTE_DATA')
 
 
 def pytest_configure(config):
+    treat_deprecations_as_exceptions()
+
+    # Monkeypatch to deny access to remote resources unless explicitly told
+    # otherwise
+    if not config.getoption('remote_data'):
+        turn_off_internet(verbose=config.option.verbose)
+
     doctest_plugin = config.pluginmanager.getplugin('doctest')
     if (doctest_plugin is None or config.option.doctestmodules or not
             (config.getini('doctest_plus') or config.option.doctest_plus)):
@@ -129,7 +151,12 @@ def pytest_configure(config):
             if self.fspath.basename == "conftest.py":
                 module = self.config._conftest.importconftest(self.fspath)
             else:
-                module = self.fspath.pyimport()
+                try:
+                    module = self.fspath.pyimport()
+                    # Just ignore searching modules that can't be imported when
+                    # collecting doctests
+                except ImportError:
+                    raise StopIteration
 
             # uses internal doctest module parsing mechanism
             finder = DocTestFinderPlus()
@@ -203,10 +230,14 @@ def pytest_configure(config):
 
                     last_line = lines[-1]
                     match = re.match(
-                        r'\.\.\s+doctest-skip\s*::', last_line)
+                        r'\.\.\s+doctest-skip\s*::(\s+.*)?', last_line)
                     if match:
-                        skip_next = True
-                        continue
+                        marker = match.group(1)
+                        if (marker is None or
+                                (marker.strip() == 'win32' and
+                                 sys.platform == 'win32')):
+                            skip_next = True
+                            continue
 
                     match = re.match(
                         r'\.\.\s+doctest-requires\s*::\s+(.*)',
@@ -229,6 +260,10 @@ def pytest_configure(config):
                     config.getini('doctest_rst') or config.option.doctest_rst),
         'doctestplus')
 
+    # Remove the doctest_plugin, or we'll end up testing the .rst
+    # files twice.
+    config.pluginmanager.unregister(doctest_plugin)
+
 
 class DoctestPlus(object):
     def __init__(self, doctest_module_item_cls, doctest_textfile_item_cls,
@@ -245,9 +280,10 @@ class DoctestPlus(object):
         self._doctest_textfile_item_cls = doctest_textfile_item_cls
         self._run_rst_doctests = run_rst_doctests
 
+        # Directories to ignore when adding doctests
+        self._ignore_paths = []
+
         if run_rst_doctests and six.PY3:
-            warnings.warn(
-                "Running doctests in .rst files is not yet supported on Python 3")
             self._run_rst_doctests = False
 
     def pytest_ignore_collect(self, path, config):
@@ -255,7 +291,13 @@ class DoctestPlus(object):
 
         for pattern in config.getini("doctest_norecursedirs"):
             if path.check(fnmatch=pattern):
-                return True
+                # Apparently pytest_ignore_collect causes files not to be
+                # collected by any test runner; for DoctestPlus we only want to
+                # avoid creating doctest nodes for them
+                self._ignore_paths.append(path)
+                break
+
+        return False
 
     def pytest_collect_file(self, path, parent):
         """Implements an enhanced version of the doctest module from py.test
@@ -288,6 +330,11 @@ class DoctestPlus(object):
             __doctest_requires__ = {('func1', 'func2'): ['scipy']}
 
         """
+
+        for ignore_path in self._ignore_paths:
+            if ignore_path.common(path) == ignore_path:
+                return None
+
         if path.ext == '.py':
             if path.basename == 'conf.py':
                 return None
@@ -519,6 +566,9 @@ def pytest_report_header(config):
     if opts:
         s += "Using Astropy options: {0}.\n".format(" ".join(opts))
 
+    if six.PY3 and (config.getini('doctest_rst') or config.option.doctest_rst):
+        s += "Running doctests in .rst files is not supported on Python 3.x\n"
+
     if not six.PY3:
         s = s.encode(stdoutencoding, 'replace')
 
@@ -564,3 +614,154 @@ def modarg(request):
                 os.environ['XDG_CACHE_HOME'] = oldcachedir
 
         request.addfinalizer(teardown)
+
+
+def pytest_pycollect_makemodule(path, parent):
+    # This is where we set up testing both with and without
+    # from __future__ import unicode_literals
+
+    # On Python 3, just do the regular thing that py.test does
+    if six.PY3:
+        return pytest.Module(path, parent)
+    elif six.PY2:
+        return Pair(path, parent)
+
+
+class Pair(pytest.File):
+    """
+    This class treats a given test .py file as a pair of .py files
+    where one has __future__ unicode_literals and the other does not.
+    """
+    def collect(self):
+        # First, just do the regular import of the module to make
+        # sure it's sane and valid.  This block is copied directly
+        # from py.test
+        try:
+            mod = self.fspath.pyimport(ensuresyspath=True)
+        except SyntaxError:
+            excinfo = pytest.py.code.ExceptionInfo()
+            raise self.CollectError(excinfo.getrepr(style="short"))
+        except self.fspath.ImportMismatchError:
+            e = sys.exc_info()[1]
+            raise self.CollectError(
+                "import file mismatch:\n"
+                "imported module %r has this __file__ attribute:\n"
+                "  %s\n"
+                "which is not the same as the test file we want to collect:\n"
+                "  %s\n"
+                "HINT: remove __pycache__ / .pyc files and/or use a "
+                "unique basename for your test file modules"
+                % e.args
+            )
+
+        # Now get the file's content.
+        with io.open(six.text_type(self.fspath), 'rb') as fd:
+            content = fd.read()
+
+        # If the file contains the special marker, only test it both ways.
+        if b'TEST_UNICODE_LITERALS' in content:
+            # Return the file in both unicode_literal-enabled and disabled forms
+            return [
+                UnicodeLiteralsModule(mod.__name__, content, self.fspath, self),
+                NoUnicodeLiteralsModule(mod.__name__, content, self.fspath, self)
+            ]
+        else:
+            return [pytest.Module(self.fspath, self)]
+
+
+_RE_FUTURE_IMPORTS = re.compile(br'from __future__ import ((\(.*?\))|([^\n]+))',
+                                flags=re.DOTALL)
+
+
+class ModifiedModule(pytest.Module):
+    def __init__(self, mod_name, content, path, parent):
+        self.mod_name = mod_name
+        self.content = content
+        super(ModifiedModule, self).__init__(path, parent)
+
+    def _importtestmodule(self):
+        # We have to remove the __future__ statements *before* parsing
+        # with compile, otherwise the flags are ignored.
+        content = re.sub(_RE_FUTURE_IMPORTS, b'', self.content)
+
+        new_mod = types.ModuleType(self.mod_name)
+        new_mod.__file__ = six.text_type(self.fspath)
+
+        if hasattr(self, '_transform_ast'):
+            # ast.parse doesn't let us hand-select the __future__
+            # statements, but built-in compile, with the PyCF_ONLY_AST
+            # flag does.
+            tree = compile(
+                content, six.text_type(self.fspath), 'exec',
+                self.flags | ast.PyCF_ONLY_AST, True)
+            tree = self._transform_ast(tree)
+            # Now that we've transformed the tree, recompile it
+            code = compile(
+                tree, six.text_type(self.fspath), 'exec')
+        else:
+            # If we don't need to transform the AST, we can skip
+            # parsing/compiling in two steps
+            code = compile(
+                content, six.text_type(self.fspath), 'exec',
+                self.flags, True)
+
+        pwd = os.getcwd()
+        try:
+            os.chdir(os.path.dirname(six.text_type(self.fspath)))
+            six.exec_(code, new_mod.__dict__)
+        finally:
+            os.chdir(pwd)
+        self.config.pluginmanager.consider_module(new_mod)
+        return new_mod
+
+
+class UnicodeLiteralsModule(ModifiedModule):
+    flags = (
+        __future__.absolute_import.compiler_flag |
+        __future__.division.compiler_flag |
+        __future__.print_function.compiler_flag |
+        __future__.unicode_literals.compiler_flag
+    )
+
+
+class NoUnicodeLiteralsModule(ModifiedModule):
+    flags = (
+        __future__.absolute_import.compiler_flag |
+        __future__.division.compiler_flag |
+        __future__.print_function.compiler_flag
+    )
+
+    def _transform_ast(self, tree):
+        # When unicode_literals is disabled, we still need to convert any
+        # byte string containing non-ascii characters into a Unicode string.
+        # If it doesn't decode as utf-8, we assume it's some other kind
+        # of byte string and just ultimately leave it alone.
+
+        # Note that once we drop support for Python 3.2, we should be
+        # able to remove this transformation and just put explicit u''
+        # prefixes in the test source code.
+
+        class NonAsciiLiteral(ast.NodeTransformer):
+            def visit_Str(self, node):
+                s = node.s
+                if isinstance(s, bytes):
+                    try:
+                        s.decode('ascii')
+                    except UnicodeDecodeError:
+                        try:
+                            s = s.decode('utf-8')
+                        except UnicodeDecodeError:
+                            pass
+                        else:
+                            return ast.copy_location(ast.Str(s=s), node)
+                return node
+        return NonAsciiLiteral().visit(tree)
+
+def pytest_unconfigure():
+    """
+    Cleanup post-testing
+    """
+    # restore internet connectivity (only lost if remote_data=False and
+    # turn_off_internet previously called)
+    # this is harmless / does nothing if socket connections were never disabled
+    turn_on_internet()

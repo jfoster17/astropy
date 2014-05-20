@@ -4,16 +4,20 @@
 Units and Quantities (`astropy.units`)
 **************************************
 
-.. |quantity| replace:: :class:`~astropy.units.quantity.Quantity`
+.. |quantity| replace:: :class:`~astropy.units.Quantity`
 
 .. currentmodule:: astropy.units
 
 Introduction
 ============
 
-`astropy.units` handles defining and converting between physical
-units, and performing arithmetic with physical quantities (numbers
-with associated units).
+`astropy.units` handles defining, converting between, and performing 
+arithmetic with physical quantities. Examples of physical quantities 
+are meters, seconds, Hz, etc.
+
+`astropy.units` does not know spherical geometry or sexagesimal 
+(hours, min, sec): if you want to deal with celestial coordinates, 
+see the `astropy.coordinates` package.  
 
 Getting Started
 ===============

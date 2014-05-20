@@ -14,21 +14,28 @@ details on the implementation see :ref:`io_registry`.
 Getting started with Table I/O
 ------------------------------
 
-The :class:`~astropy.table.table.Table` class includes two methods,
-:meth:`~astropy.table.table.Table.read` and
-:meth:`~astropy.table.table.Table.write`, that make it possible to read from
+The :class:`~astropy.table.Table` class includes two methods,
+:meth:`~astropy.table.Table.read` and
+:meth:`~astropy.table.Table.write`, that make it possible to read from
 and write to files. A number of formats are automatically supported (see
 `Built-in table readers/writers`_) and new file formats and extensions can be
-registered with the :class:`~astropy.table.table.Table` class (see
+registered with the :class:`~astropy.table.Table` class (see
 :ref:`io_registry`).
 
-To use this interface, first import the :class:`~astropy.table.table.Table` class, then
-simply call the :class:`~astropy.table.table.Table`
-:meth:`~astropy.table.table.Table.read` method with the name of the file and
+To use this interface, first import the :class:`~astropy.table.Table` class, then
+simply call the :class:`~astropy.table.Table`
+:meth:`~astropy.table.Table.read` method with the name of the file and
 the file format, for instance ``'ascii.daophot'``::
 
     >>> from astropy.table import Table
     >>> t = Table.read('photometry.dat', format='ascii.daophot')
+
+It is possible to load tables directly from the Internet using URLs. For example,
+download tables from Vizier catalogues in CDS format (``'ascii.cds'``)::
+
+    >>> t = Table.read("ftp://cdsarc.u-strasbg.fr/pub/cats/VII/253/snrs.dat", 
+    ...         readme="ftp://cdsarc.u-strasbg.fr/pub/cats/VII/253/ReadMe", 
+    ...         format="ascii.cds")
 
 For certain file formats, the format can be automatically detected, for
 example from the filename extension::
@@ -39,7 +46,7 @@ Similarly, for writing, the format can be explicitly specified::
 
     >>> t.write(filename, format='latex')
 
-As for the :meth:`~astropy.table.table.Table.read` method, the format may
+As for the :meth:`~astropy.table.Table.read` method, the format may
 be automatically identified in some cases.
 
 Any additional arguments specified will depend on the format.  For examples of this see the
@@ -80,7 +87,7 @@ ascii.fixed_width_no_header  Yes   Yes            No
                        ipac  Yes   Yes            No        Yes
                       latex  Yes   Yes            No        Yes
                         rdb  Yes   Yes            No        Yes
-                    votable  Yes   Yes           Yes           
+                    votable  Yes   Yes           Yes
 =========================== ==== ===== ============= ==========
 
 Deprecated format names like ``aastex`` will be removed in a future version.
@@ -91,12 +98,12 @@ Use the full name (e.g. ``ascii.aastex``) instead.
 ASCII formats
 ^^^^^^^^^^^^^^
 
-The :meth:`~astropy.table.table.Table.read` and
-:meth:`~astropy.table.table.Table.write` methods can be used to read and write formats
+The :meth:`~astropy.table.Table.read` and
+:meth:`~astropy.table.Table.write` methods can be used to read and write formats
 supported by `astropy.io.ascii`.
 
 Use ``format='ascii'`` in order to interface to the generic
-:func:`~astropy.io.ascii.ui.read` and :func:`~astropy.io.ascii.ui.write`
+:func:`~astropy.io.ascii.read` and :func:`~astropy.io.ascii.write`
 functions from `astropy.io.ascii`.  When reading a table this means
 that all supported ASCII table formats will be tried in order to successfully
 parse the input.  For example::
@@ -113,7 +120,7 @@ character-delimited file with a single header line containing the
 column names.
 
 All additional arguments are passed to the `astropy.io.ascii`
-:func:`~astropy.io.ascii.ui.read` and :func:`~astropy.io.ascii.ui.write`
+:func:`~astropy.io.ascii.read` and :func:`~astropy.io.ascii.write`
 functions. Further details are available in the sections on
 :ref:`io_ascii_read_parameters` and :ref:`io_ascii_write_parameters`.  For example, to change
 column delimiter and the output format for the ``colc`` column use::
@@ -132,21 +139,21 @@ indicates which support write functionality.
            Format               Suffix Write                                          Description
 =============================== ====== ===== ============================================================================================
 ``ascii``                                Yes ASCII table in any supported format (uses guessing)
-``ascii.aastex``                         Yes :class:`~astropy.io.ascii.latex.AASTex`: AASTeX deluxetable used for AAS journals
-``ascii.basic``                          Yes :class:`~astropy.io.ascii.basic.Basic`: Basic table with custom delimiters
-``ascii.cds``                                :class:`~astropy.io.ascii.cds.Cds`: CDS format table
-``ascii.commented_header``               Yes :class:`~astropy.io.ascii.basic.CommentedHeader`: Column names in a commented line
-``ascii.daophot``                            :class:`~astropy.io.ascii.daophot.Daophot`: IRAF DAOphot format table
-``ascii.fixed_width``                    Yes :class:`~astropy.io.ascii.fixedwidth.FixedWidth`: Fixed width
-``ascii.fixed_width_no_header``          Yes :class:`~astropy.io.ascii.fixedwidth.FixedWidthNoHeader`: Fixed width with no header
-``ascii.fixed_width_two_line``           Yes :class:`~astropy.io.ascii.fixedwidth.FixedWidthTwoLine`: Fixed width with second header line
-``ascii.ipac``                           Yes :class:`~astropy.io.ascii.ipac.Ipac`: IPAC format table
-``ascii.latex``                   .tex   Yes :class:`~astropy.io.ascii.latex.Latex`: LaTeX table
-``ascii.no_header``                      Yes :class:`~astropy.io.ascii.basic.NoHeader`: Basic table with no headers
-``ascii.rdb``                     .rdb   Yes :class:`~astropy.io.ascii.basic.Rdb`: Tab-separated with a type definition header line
-``ascii.sextractor``                         :class:`~astropy.io.ascii.sextractor.SExtractor`: SExtractor format table
-``ascii.tab``                            Yes :class:`~astropy.io.ascii.basic.Tab`: Basic table with tab-separated values
-``ascii.csv``                     .csv   Yes :class:`~astropy.io.ascii.basic.Csv`: Basic table with comma-separated values
+``ascii.aastex``                         Yes :class:`~astropy.io.ascii.AASTex`: AASTeX deluxetable used for AAS journals
+``ascii.basic``                          Yes :class:`~astropy.io.ascii.Basic`: Basic table with custom delimiters
+``ascii.cds``                                :class:`~astropy.io.ascii.Cds`: CDS format table
+``ascii.commented_header``               Yes :class:`~astropy.io.ascii.CommentedHeader`: Column names in a commented line
+``ascii.daophot``                            :class:`~astropy.io.ascii.Daophot`: IRAF DAOphot format table
+``ascii.fixed_width``                    Yes :class:`~astropy.io.ascii.FixedWidth`: Fixed width
+``ascii.fixed_width_no_header``          Yes :class:`~astropy.io.ascii.FixedWidthNoHeader`: Fixed width with no header
+``ascii.fixed_width_two_line``           Yes :class:`~astropy.io.ascii.FixedWidthTwoLine`: Fixed width with second header line
+``ascii.ipac``                           Yes :class:`~astropy.io.ascii.Ipac`: IPAC format table
+``ascii.latex``                   .tex   Yes :class:`~astropy.io.ascii.Latex`: LaTeX table
+``ascii.no_header``                      Yes :class:`~astropy.io.ascii.NoHeader`: Basic table with no headers
+``ascii.rdb``                     .rdb   Yes :class:`~astropy.io.ascii.Rdb`: Tab-separated with a type definition header line
+``ascii.sextractor``                         :class:`~astropy.io.ascii.SExtractor`: SExtractor format table
+``ascii.tab``                            Yes :class:`~astropy.io.ascii.Tab`: Basic table with tab-separated values
+``ascii.csv``                     .csv   Yes :class:`~astropy.io.ascii.Csv`: Basic table with comma-separated values
 =============================== ====== ===== ============================================================================================
 
 .. note::
@@ -173,12 +180,12 @@ files should be automatically identified as such based on the header of the
 file, but if not, or if writing to disk, then the format should be explicitly
 specified.
 
-If a FITS table file only contains a single table, then it can be read in
+If a FITS table file contains only a single table, then it can be read in
 with::
 
     >>> t = Table.read('data.fits')
 
-If more that one table are present in the file, the first table found will be
+If more than one table is present in the file, the first table found will be
 read in and a warning will be emitted::
 
     >>> t = Table.read('data.fits')
@@ -189,7 +196,7 @@ To write to a new file::
     >>> t.write('new_table.fits')
 
 At this time, the ``meta`` attribute of the
-:class:`~astropy.table.table.Table` class is simply an ordered
+:class:`~astropy.table.Table` class is simply an ordered
 dictionary and does not fully represent the structure of a FITS
 header (for example, keyword comments are dropped). This is likely
 to change in a future release.
@@ -245,11 +252,11 @@ tables should be automatically identified as such based on the header of the
 file, but if not, or if writing to disk, then the format should be explicitly
 specified.
 
-If a VO table file only contains a single table, then it can be read in with::
+If a VO table file contains only a single table, then it can be read in with::
 
     >>> t = Table.read('aj285677t3_votable.xml')
 
-If more that one table are present in the file, an error will be raised,
+If more than one table is present in the file, an error will be raised,
 unless the table ID is specified via the ``table_id=`` argument::
 
     >>> t = Table.read('catalog.xml')

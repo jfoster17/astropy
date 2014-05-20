@@ -49,8 +49,8 @@ size, columns, or data are not known.
   >>> t.add_row((4, 5.0, 'y'))
 
 
-List input
-""""""""""
+List of columns
+"""""""""""""""
 A typical case is where you have a number of data columns with the same length
 defined in different variables.  These might be Python lists or `numpy` arrays
 or a mix of the two.  These can be used to create a |Table| by putting the column
@@ -71,7 +71,7 @@ keyword or they will be auto-generated as ``col<N>``.
 
 **Make a new table using columns from the first table**
 
-Once you have a `Table` then you can make new table by selecting columns
+Once you have a |Table| then you can make new table by selecting columns
 and putting this into a Python list, e.g. ``[ t['c'], t['a'] ]``::
 
   >>> Table([t['c'], t['a']])
@@ -108,40 +108,7 @@ of different data types to initialize a table::
 Notice that in the third column the existing column name ``'axis'`` is used.
 
 
-**Use row data instead of column data**
-
-You can also initialize a table with row values.  This is constructed as a
-list of dict objects.  The keys determine the column names::
-
-  >>> data = [{'a': 5, 'b': 10}, {'a': 15, 'b': 20}]
-  >>> Table(data)
-  <Table rows=2 names=('a','b')>
-  array([(5, 10), (15, 20)],
-        dtype=[('a', '<i8'), ('b', '<i8')])
-
-Every row must have the same set of keys or a ValueError will be thrown::
-
-  >>> t = Table([{'a': 5, 'b': 10}, {'a': 15, 'b': 30, 'c': 50}])
-  Traceback (most recent call last):
-    ...
-  ValueError: Row 0 has no value for column c
-
-Row input
-"""""""""
-
-You can make a new table from a single row of an existing table::
-
-  >>> a = [1, 4]
-  >>> b = [2.0, 5.0]
-  >>> t = Table([a, b], names=('a', 'b'))
-  >>> t2 = Table(t[1])
-
-Remember that a |Row| has effectively a zero length compared to the
-newly created |Table| which has a length of one.  This is similar to
-the difference between a scalar ``1`` (length 0) and an array like
-``np.array([1])`` with length 1.
-
-Dictionary input
+Dict of columns
 """"""""""""""""
 A dictionary of column data can be used to initialize a |Table|.
 
@@ -186,6 +153,71 @@ column where each row element is itself a 2-element array.
     ...
   KeyError: 'a_new'
 
+
+Row data
+"""""""""
+Row-oriented data can be used to create a table using the ``rows``
+keyword argument.
+
+**List of data records as list or tuple**
+
+If you have row-oriented input data such as a list of records, you
+need to use the ``rows`` keyword to create a table::
+
+  >>> data_rows = [(1, 2.0, 'x'),
+  ...              (4, 5.0, 'y'),
+  ...              (5, 8.2, 'z')]
+  >>> t = Table(rows=data_rows, names=('a', 'b', 'c'))
+  >>> print(t)
+   a   b   c 
+  --- --- ---
+    1 2.0   x
+    4 5.0   y
+    5 8.2   z
+
+The data object passed as the ``rows`` argument can be any form which is
+parsable by the ``np.rec.fromrecords()`` function.
+
+**List of dict objects**
+
+You can also initialize a table with row values.  This is constructed as a
+list of dict objects.  The keys determine the column names::
+
+  >>> data = [{'a': 5, 'b': 10},
+  ...         {'a': 15, 'b': 20}]
+  >>> Table(rows=data)
+  <Table rows=2 names=('a','b')>
+  array([(5, 10), (15, 20)],
+        dtype=[('a', '<i8'), ('b', '<i8')])
+
+Every row must have the same set of keys or a ValueError will be thrown::
+
+  >>> t = Table(rows=[{'a': 5, 'b': 10}, {'a': 15, 'b': 30, 'c': 50}])
+  Traceback (most recent call last):
+    ...
+  ValueError: Row 0 has no value for column c
+
+**Single row**
+
+You can also make a new table from a single row of an existing table::
+
+  >>> a = [1, 4]
+  >>> b = [2.0, 5.0]
+  >>> t = Table([a, b], names=('a', 'b'))
+  >>> t2 = Table(rows=t[1])
+
+Remember that a |Row| has effectively a zero length compared to the
+newly created |Table| which has a length of one.  This is similar to
+the difference between a scalar ``1`` (length 0) and an array like
+``np.array([1])`` with length 1.
+
+.. Note::
+
+   In the case of input data as a list of dicts or a single Table row, it is
+   allowed to supply the data as the ``data`` argument since these forms
+   are always unambiguous.  For example ``Table([{'a': 1}, {'a': 2}])`` is
+   accepted.  However, a list of records must always be provided using the
+   ``rows`` keyword, otherwise it will be interpreted as a list of columns.
 
 NumPy structured array
 """"""""""""""""""""""
@@ -301,17 +333,6 @@ homogeneous `numpy` array input is interpreted as a list of rows::
 This dichotomy is needed to support flexible list input while retaining the
 natural interpretation of 2-d `numpy` arrays where the first index corresponds
 to data "rows" and the second index corresponds to data "columns".
-
-If you have a Python list which is structured as a list of data rows, use the
-following trick to effectively transpose into a list of columns for
-initializing a |Table| object::
-
-   >>> arr = [[1, 2.0, 'string'],  # list of rows
-   ...        [2, 3.0, 'values']]
-   >>> col_arr = zip(*arr)  # transpose to a list of columns
-   >>> col_arr
-   [(1, 2), (2.0, 3.0), ('string', 'values')]
-   >>> t = Table(col_arr)
 
 Table columns
 """""""""""""
@@ -442,7 +463,7 @@ then it must be a list with the same length as the number of columns.  The
 values must be valid ``numpy.dtype`` initializers or ``None``.  Any list
 elements with value ``None`` fall back to the default type.
 
-In the case where `data` is provided as dict of columns, the ``dtype`` argument
+In the case where ``data`` is provided as dict of columns, the ``dtype`` argument
 must be accompanied by a corresponding ``names`` argument in order to uniquely
 specify the column ordering.
 
@@ -485,12 +506,12 @@ linked, as shown below::
   >>> arr = np.array([(1, 2.0, 'x'),
   ...                 (4, 5.0, 'y')],
   ...                dtype=[('a', 'i8'), ('b', 'f8'), ('c', 'S2')])
-  >>> arr['a']  # column "a" of the input array
-  array([1, 4])
+  >>> print arr['a']  # column "a" of the input array
+  [1 4]
   >>> t = Table(arr, copy=False)
   >>> t['a'][1] = 99
-  >>> arr['a']  # arr['a'] got changed when we modified t['a']
-  array([ 1, 99])
+  >>> print arr['a']  # arr['a'] got changed when we modified t['a']
+  [ 1 99]
 
 Note that when referencing the data it is not possible to change the data types
 since that operation requires making a copy of the data.  In this case an error
@@ -565,7 +586,7 @@ The column data values, shape, and data type are specified in one of two ways:
   - Numpy non-string type (e.g. np.float32, np.int64, np.bool)
   - Numpy.dtype array-protocol type strings (e.g. 'i4', 'f8', 'S15')
 
-  If no ``dtype`` value is provide then the type is inferred using
+  If no ``dtype`` value is provided then the type is inferred using
   ``np.array(data)``.  When ``data`` is provided then the ``shape``
   and ``length`` arguments are ignored.
 
@@ -686,3 +707,123 @@ So now look at the ways to select columns from a |TableColumns| object:
   >>> t.columns['b']  # Choose column by name
   <Column name='b' unit=None format=None description=None>
   array([], dtype=float64)
+
+
+.. _subclassing_table:
+
+Subclassing Table
+^^^^^^^^^^^^^^^^^
+
+For some applications it can be useful to subclass the |Table| class in order
+to introduce specialized behavior.  In addition to subclassing |Table| it is
+frequently desirable to change the behavior of the internal class objects which
+are contained or created by a Table.  This includes rows, columns, formatting,
+and the columns container.  In order to do this the subclass needs to declare
+what class to use (if it is different from the built-in version).  This is done by
+specifying one or more of the class attributes ``Row``, ``Column``,
+``MaskedColumn``, ``TableColumns``, or ``TableFormatter``.
+
+The following trivial example overrides all of these with do-nothing
+subclasses, but in practice you would override only the necessary subcomponents::
+
+  >>> from astropy.table import Table, Row, Column, MaskedColumn, TableColumns, TableFormatter
+
+  >>> class MyRow(Row): pass
+  >>> class MyColumn(Column): pass
+  >>> class MyMaskedColumn(MaskedColumn): pass
+  >>> class MyTableColumns(TableColumns): pass
+  >>> class MyTableFormatter(TableFormatter): pass
+
+  >>> class MyTable(Table):
+  ...     """
+  ...     Custom subclass of astropy.table.Table
+  ...     """
+  ...     Row = MyRow  # Use MyRow to create a row object
+  ...     Column = MyColumn  # Column
+  ...     MaskedColumn = MyMaskedColumn  # Masked Column
+  ...     TableColumns = MyTableColumns  # Ordered dict holding Column objects
+  ...     TableFormatter = MyTableFormatter  # Controls table output
+
+
+Example
+""""""""
+
+As a more practical example, suppose you have a table of data with a certain set of fixed
+columns, but you also want to carry an arbitrary dictionary of keyword=value
+parameters for each row and then access those values using the same item access
+syntax as if they were columns.  It is assumed here that the extra parameters
+are contained in a numpy object-dtype column named ``params``::
+
+  >>> from astropy.table import Table, Row
+  >>> class ParamsRow(Row):
+  ...    """
+  ...    Row class that allows access to an arbitrary dict of parameters
+  ...    stored as a dict object in the ``params`` column.
+  ...    """
+  ...    def __getitem__(self, item):
+  ...        if item not in self.colnames:
+  ...            return self.data['params'][item]
+  ...        else:
+  ...            return self.data[item]
+  ...
+  ...    def keys(self):
+  ...        out = [name for name in self.colnames if name != 'params']
+  ...        params = [key.lower() for key in sorted(self.data['params'])]
+  ...        return out + params
+  ...
+  ...    def values(self):
+  ...        return [self[key] for key in self.keys()]
+
+Now we put this into action with a trival |Table| subclass::
+
+  >>> class ParamsTable(Table):
+  ...     Row = ParamsRow
+
+First make a table and add a couple of rows::
+
+  >>> t = ParamsTable(names=['a', 'b', 'params'], dtype=['i', 'f', 'O'])
+  >>> t.add_row((1, 2.0, {'x': 1.5, 'y': 2.5}))
+  >>> t.add_row((2, 3.0, {'z': 'hello', 'id': 123123}))
+  >>> print(t)
+   a   b             params
+  --- --- ----------------------------
+    1 2.0         {'y': 2.5, 'x': 1.5}
+    2 3.0 {'z': 'hello', 'id': 123123}
+
+Now see what we have from our specialized ``ParamsRow`` object::
+
+  >>> t[0]['y']
+  2.5
+  >>> t[1]['id']
+  123123
+  >>> t[1].keys()
+  ['a', 'b', 'id', 'z']
+  >>> t[1].values()
+  [2, 3.0, 123123, 'hello']
+
+To make this example really useful you might want to override
+``Table.__getitem__`` in order to allow table-level access to the parameter
+fields.  This might look something like::
+
+  class ParamsTable(table.Table):
+      Row = ParamsRow
+
+      def __getitem__(self, item):
+          if isinstance(item, six.string_types):
+              if item in self.colnames:
+                  return self.columns[item]
+              else:
+                  # If item is not a column name then create a new MaskedArray
+                  # corresponding to self['params'][item] for each row.  This
+                  # might not exist in some rows so mark as masked (missing) in
+                  # those cases.
+                  mask = np.zeros(len(self), dtype=np.bool)
+                  item = item.upper()
+                  values = [params.get(item) for params in self['params']]
+                  for ii, value in enumerate(values):
+                      if value is None:
+                          mask[ii] = True
+                          values[ii] = ''
+                  return self.MaskedColumn(name=item, data=values, mask=mask)
+
+          # ... and then the rest of the original __getitem__ ...

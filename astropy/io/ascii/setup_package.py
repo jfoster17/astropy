@@ -13,10 +13,12 @@ def get_package_data():
                                    't/bad.txt',
                                    't/bars_at_ends.txt',
                                    't/cds.dat',
+                                   't/cds_malformed.dat',
                                    't/cds/glob/ReadMe',
                                    't/cds/glob/lmxbrefs.dat',
                                    't/cds/multi/ReadMe',
                                    't/cds/multi/lhs2065.dat',
+                                   't/cds/multi/lp944-20.dat',
                                    't/cds2.dat',
                                    't/commented_header.dat',
                                    't/commented_header2.dat',
@@ -24,8 +26,11 @@ def get_package_data():
                                    't/daophot.dat',
                                    't/daophot2.dat',
                                    't/sextractor.dat',
+                                   't/sextractor2.dat',
                                    't/daophot.dat.gz',
                                    't/fill_values.txt',
+                                   't/html.html',
+                                   't/html2.html',
                                    't/ipac.dat',
                                    't/ipac.dat.bz2',
                                    't/latex1.tex',
@@ -55,8 +60,10 @@ def get_package_data():
                                    't/vots_spec.dat',
                                    't/whitespace.dat',
                                    't/simple_csv.csv',
-                                   't/badcsv_1.csv',
-                                   't/badcsv_2.csv',
-                                   't/badcsv_3.csv',
+                                   't/simple_csv_missing.csv',
                                    ]
     }
+
+
+def requires_2to3():
+    return False

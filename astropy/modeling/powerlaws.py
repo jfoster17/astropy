@@ -4,11 +4,12 @@
 Power law model variants
 """
 
-from __future__ import division
+from __future__ import (absolute_import, unicode_literals, division,
+                        print_function)
 
 import numpy as np
 
-from .core import Parametric1DModel
+from .core import Fittable1DModel
 from .parameters import Parameter
 
 
@@ -16,7 +17,7 @@ __all__ = sorted(['PowerLaw1D', 'BrokenPowerLaw1D',
                   'ExponentialCutoffPowerLaw1D', 'LogParabola1D'])
 
 
-class PowerLaw1D(Parametric1DModel):
+class PowerLaw1D(Fittable1DModel):
     """
     One dimensional power law model.
 
@@ -41,9 +42,9 @@ class PowerLaw1D(Parametric1DModel):
 
     """
 
-    amplitude = Parameter('amplitude')
-    x_0 = Parameter('x_0')
-    alpha = Parameter('alpha')
+    amplitude = Parameter()
+    x_0 = Parameter()
+    alpha = Parameter()
 
     def __init__(self, amplitude, x_0, alpha, **constraints):
         super(PowerLaw1D, self).__init__(amplitude=amplitude, x_0=x_0,
@@ -57,8 +58,8 @@ class PowerLaw1D(Parametric1DModel):
         return amplitude * xx ** (-alpha)
 
     @staticmethod
-    def deriv(x, amplitude, x_0, alpha):
-        """One dimensional power law derivative"""
+    def fit_deriv(x, amplitude, x_0, alpha):
+        """One dimensional power law derivative with respect to parameters"""
 
         xx = x / x_0
 
@@ -69,7 +70,7 @@ class PowerLaw1D(Parametric1DModel):
         return [d_amplitude, d_x_0, d_alpha]
 
 
-class BrokenPowerLaw1D(Parametric1DModel):
+class BrokenPowerLaw1D(Fittable1DModel):
     """
     One dimensional power law model with a break.
 
@@ -103,10 +104,10 @@ class BrokenPowerLaw1D(Parametric1DModel):
                    \\right.
     """
 
-    amplitude = Parameter('amplitude')
-    x_break = Parameter('x_break')
-    alpha_1 = Parameter('alpha_1')
-    alpha_2 = Parameter('alpha_2')
+    amplitude = Parameter()
+    x_break = Parameter()
+    alpha_1 = Parameter()
+    alpha_2 = Parameter()
 
     def __init__(self, amplitude, x_break, alpha_1, alpha_2, **constraints):
         super(BrokenPowerLaw1D, self).__init__(
@@ -122,8 +123,8 @@ class BrokenPowerLaw1D(Parametric1DModel):
         return amplitude * xx ** (-alpha)
 
     @staticmethod
-    def deriv(x, amplitude, x_break, alpha_1, alpha_2):
-        """One dimensional broken power law derivative"""
+    def fit_deriv(x, amplitude, x_break, alpha_1, alpha_2):
+        """One dimensional broken power law derivative with respect to parameters"""
 
         alpha = np.where(x < x_break, alpha_1, alpha_2)
         xx = x / x_break
@@ -137,7 +138,7 @@ class BrokenPowerLaw1D(Parametric1DModel):
         return [d_amplitude, d_x_break, d_alpha_1, d_alpha_2]
 
 
-class ExponentialCutoffPowerLaw1D(Parametric1DModel):
+class ExponentialCutoffPowerLaw1D(Fittable1DModel):
     """
     One dimensional power law model with an exponential cutoff.
 
@@ -164,10 +165,10 @@ class ExponentialCutoffPowerLaw1D(Parametric1DModel):
 
     """
 
-    amplitude = Parameter('amplitude')
-    x_0 = Parameter('x_0')
-    alpha = Parameter('alpha')
-    x_cutoff = Parameter('x_cutoff')
+    amplitude = Parameter()
+    x_0 = Parameter()
+    alpha = Parameter()
+    x_cutoff = Parameter()
 
     def __init__(self, amplitude, x_0, alpha, x_cutoff, **constraints):
         super(ExponentialCutoffPowerLaw1D, self).__init__(
@@ -182,8 +183,8 @@ class ExponentialCutoffPowerLaw1D(Parametric1DModel):
         return amplitude * xx ** (-alpha) * np.exp(-x / x_cutoff)
 
     @staticmethod
-    def deriv(x, amplitude, x_0, alpha, x_cutoff):
-        """One dimensional exponential cutoff power law derivative"""
+    def fit_deriv(x, amplitude, x_0, alpha, x_cutoff):
+        """One dimensional exponential cutoff power law derivative with respect to parameters"""
 
         xx = x / x_0
         xc = x / x_cutoff
@@ -196,7 +197,7 @@ class ExponentialCutoffPowerLaw1D(Parametric1DModel):
         return [d_amplitude, d_x_0, d_alpha, d_x_cutoff]
 
 
-class LogParabola1D(Parametric1DModel):
+class LogParabola1D(Fittable1DModel):
     """
     One dimensional log parabola model (sometimes called curved power law).
 
@@ -223,10 +224,10 @@ class LogParabola1D(Parametric1DModel):
 
     """
 
-    amplitude = Parameter('amplitude')
-    x_0 = Parameter('x_0')
-    alpha = Parameter('alpha')
-    beta = Parameter('beta')
+    amplitude = Parameter()
+    x_0 = Parameter()
+    alpha = Parameter()
+    beta = Parameter()
 
     def __init__(self, amplitude, x_0, alpha, beta, **constraints):
         super(LogParabola1D, self).__init__(
@@ -242,8 +243,8 @@ class LogParabola1D(Parametric1DModel):
         return amplitude * xx ** exponent
 
     @staticmethod
-    def deriv(x, amplitude, x_0, alpha, beta):
-        """One dimensional log parabola derivative"""
+    def fit_deriv(x, amplitude, x_0, alpha, beta):
+        """One dimensional log parabola derivative with repsect to parameters"""
 
         xx = x / x_0
         log_xx = np.log(xx)

@@ -5,10 +5,11 @@ from __future__ import division
 import functools
 import gzip
 import itertools
+import io
 import mmap
 import os
-import platform
 import signal
+import string
 import sys
 import tempfile
 import textwrap
@@ -16,7 +17,26 @@ import threading
 import warnings
 
 import numpy as np
+
+try:
+    from StringIO import StringIO
+except ImportError:
+    # Use for isinstance test only
+    class StringIO(object):
+        pass
+
+
+from ...extern import six
+from ...extern.six import string_types, integer_types, text_type, next
+from ...extern.six.moves import zip
 from ...utils.exceptions import AstropyUserWarning
+
+
+if six.PY3:
+    cmp = lambda a, b: (a > b) - (a < b)
+elif six.PY2:
+    cmp = cmp
+
 
 def itersubclasses(cls, _seen=None):
     """
@@ -38,7 +58,7 @@ def itersubclasses(cls, _seen=None):
     C
     >>> # get ALL (new-style) classes currently defined
     >>> [cls.__name__ for cls in itersubclasses(object)]
-    ['type', ...'tuple', ...]
+    [...'tuple', ...'type', ...]
 
     From http://code.activestate.com/recipes/576949/
     """
@@ -52,7 +72,7 @@ def itersubclasses(cls, _seen=None):
         subs = cls.__subclasses__()
     except TypeError:  # fails only when cls is type
         subs = cls.__subclasses__(cls)
-    for sub in subs:
+    for sub in sorted(subs, key=lambda s: s.__name__):
         if sub not in _seen:
             _seen.add(sub)
             yield sub
@@ -105,6 +125,12 @@ def ignore_sigint(func):
     return wrapped
 
 
+def first(iterable):
+    """Returns the first element from an iterable."""
+
+    return next(iter(iterable))
+
+
 def pairwise(iterable):
     """Return the items of an iterable paired with its next item.
 
@@ -116,7 +142,7 @@ def pairwise(iterable):
         # Just a little trick to advance b without having to catch
         # StopIter if b happens to be empty
         break
-    return itertools.izip(a, b)
+    return zip(a, b)
 
 
 def encode_ascii(s):
@@ -145,6 +171,9 @@ def isreadable(f):
     sense approximation of io.IOBase.readable.
     """
 
+    if six.PY3 and hasattr(f, 'readable'):
+        return f.readable()
+
     if hasattr(f, 'closed') and f.closed:
         # This mimics the behavior of io.IOBase.readable
         raise ValueError('I/O operation on closed file')
@@ -166,6 +195,9 @@ def iswritable(f):
     sense approximation of io.IOBase.writable.
     """
 
+    if six.PY3 and hasattr(f, 'writable'):
+        return f.writable()
+
     if hasattr(f, 'closed') and f.closed:
         # This mimics the behavior of io.IOBase.writable
         raise ValueError('I/O operation on closed file')
@@ -181,30 +213,64 @@ def iswritable(f):
     return True
 
 
-def isfile(f):
-    """
-    Returns True if the given object represents an OS-level file (that is,
-    isinstance(f, file)).
+if six.PY3:
+    def isfile(f):
+        """
+        Returns True if the given object represents an OS-level file (that is,
+        ``isinstance(f, file)``).
 
-    On Python 3 this also returns True if the given object is higher level
-    wrapper on top of a FileIO object, such as a TextIOWrapper.
-    """
+        On Python 3 this also returns True if the given object is higher level
+        wrapper on top of a FileIO object, such as a TextIOWrapper.
+        """
 
-    return isinstance(f, file)
+        if isinstance(f, io.FileIO):
+            return True
+        elif hasattr(f, 'buffer'):
+            return isfile(f.buffer)
+        elif hasattr(f, 'raw'):
+            return isfile(f.raw)
+        return False
+elif six.PY2:
+    def isfile(f):
+        """
+        Returns True if the given object represents an OS-level file (that is,
+        ``isinstance(f, file)``).
+
+        On Python 3 this also returns True if the given object is higher level
+        wrapper on top of a FileIO object, such as a TextIOWrapper.
+        """
+
+        return isinstance(f, file)
 
 
-def fileobj_open(filename, mode):
-    """
-    A wrapper around the `open()` builtin.
+if six.PY3:
+    def fileobj_open(filename, mode):
+        """
+        A wrapper around the `open()` builtin.
 
-    This exists because in Python 3, `open()` returns an `io.BufferedReader` by
-    default.  This is bad, because `io.BufferedReader` doesn't support random
-    access, which we need in some cases.  In the Python 3 case (implemented in
-    the py3compat module) we must call open with buffering=0 to get a raw
-    random-access file reader.
-    """
+        This exists because in Python 3, `open()` returns an
+        `io.BufferedReader` by default.  This is bad, because
+        `io.BufferedReader` doesn't support random access, which we need in
+        some cases.  In the Python 3 case (implemented in the py3compat module)
+        we must call open with buffering=0 to get a raw random-access file
+        reader.
+        """
 
-    return open(filename, mode)
+        return open(filename, mode, buffering=0)
+elif six.PY2:
+    def fileobj_open(filename, mode):
+        """
+        A wrapper around the `open()` builtin.
+
+        This exists because in Python 3, `open()` returns an
+        `io.BufferedReader` by default.  This is bad, because
+        `io.BufferedReader` doesn't support random access, which we need in
+        some cases.  In the Python 3 case (implemented in the py3compat module)
+        we must call open with buffering=0 to get a raw random-access file
+        reader.
+        """
+
+        return open(filename, mode)
 
 
 def fileobj_name(f):
@@ -214,7 +280,7 @@ def fileobj_name(f):
     string f itself is returned.
     """
 
-    if isinstance(f, basestring):
+    if isinstance(f, string_types):
         return f
     elif hasattr(f, 'name'):
         return f.name
@@ -239,7 +305,7 @@ def fileobj_closed(f):
     elif hasattr(f, 'fp') and hasattr(f.fp, 'closed'):
         return f.fp.closed
     else:
-        return True
+        return False
 
 
 def fileobj_mode(f):
@@ -252,6 +318,9 @@ def fileobj_mode(f):
     # attribute, but it's not analogous to the file.mode attribute
     if hasattr(f, 'fileobj') and hasattr(f.fileobj, 'mode'):
         fileobj = f.fileobj
+    elif hasattr(f, 'fileobj_mode'):
+        # Specifically for astropy.io.fits.file._File objects
+        return f.fileobj_mode
     elif hasattr(f, 'fp') and hasattr(f.fp, 'mode'):
         fileobj = f.fp
     elif hasattr(f, 'mode'):
@@ -444,8 +513,9 @@ def fileobj_is_binary(f):
     if hasattr(f, 'binary'):
         return f.binary
 
-    # TODO: In Python 3 it might be more reliable to check if the fileobj is a
-    # text reader or a binary reader
+    if io is not None and isinstance(f, io.TextIOBase):
+        return False
+
     mode = fileobj_mode(f)
     if mode:
         return 'b' in mode
@@ -453,21 +523,33 @@ def fileobj_is_binary(f):
         return True
 
 
-def translate(s, table, deletechars):
-    """
-    This is a version of string/unicode.translate() that can handle string or
-    unicode strings the same way using a translation table made with
-    string.maketrans.
-    """
+if six.PY3:
+    maketrans = str.maketrans
 
-    if isinstance(s, str):
-        return s.translate(table, deletechars)
-    elif isinstance(s, unicode):
-        table = dict((x, ord(table[x])) for x in range(256)
-                     if ord(table[x]) != x)
-        for c in deletechars:
-            table[ord(c)] = None
+    def translate(s, table, deletechars):
+        if deletechars:
+            table = table.copy()
+            for c in deletechars:
+                table[ord(c)] = None
         return s.translate(table)
+elif six.PY2:
+    maketrans = string.maketrans
+
+    def translate(s, table, deletechars):
+        """
+        This is a version of string/unicode.translate() that can handle string
+        or unicode strings the same way using a translation table made with
+        `string.maketrans`.
+        """
+
+        if isinstance(s, str):
+            return s.translate(table, deletechars)
+        elif isinstance(s, text_type):
+            table = dict((x, ord(table[x])) for x in range(256)
+                         if ord(table[x]) != x)
+            for c in deletechars:
+                table[ord(c)] = None
+            return s.translate(table)
 
 
 def fill(text, width, *args, **kwargs):
@@ -512,7 +594,14 @@ def _array_to_file(arr, outfile):
         # treat as file-like object with "write" method and write the array
         # via its buffer interface
         def write(a, f):
-            f.write(a.flatten().view(np.ubyte))
+            # StringIO in some versions of Python ask 'if not s' before
+            # writing, which fails for Numpy arrays.  Test ahead of time that
+            # the array is non-empty, then pass in the array buffer directly
+            if isinstance(f, StringIO):
+                if len(a):
+                    f.write(a.data)
+            else:
+                f.write(a)
 
     # Implements a workaround for a bug deep in OSX's stdlib file writing
     # functions; on 64-bit OSX it is not possible to correctly write a number
@@ -522,8 +611,8 @@ def _array_to_file(arr, outfile):
     # implemented there yet: https://github.com/astropy/astropy/issues/839
     osx_write_limit = (2 ** 32) - 1
 
-    if (sys.platform == 'darwin' and platform.architecture()[0] == '64bit' and
-            arr.nbytes >= osx_write_limit + 1 and arr.nbytes % 4096 == 0):
+    if (sys.platform == 'darwin' and arr.nbytes >= osx_write_limit + 1 and
+            arr.nbytes % 4096 == 0):
         idx = 0
         # chunksize is a count of elements in the array, not bytes
         chunksize = osx_write_limit // arr.itemsize
@@ -544,10 +633,13 @@ def _write_string(f, s):
     # binary
     binmode = fileobj_is_binary(f)
 
-    if binmode and isinstance(s, unicode):
+    if binmode and isinstance(s, text_type):
         s = encode_ascii(s)
-    elif not binmode and not isinstance(f, unicode):
+    elif not binmode and not isinstance(f, text_type):
         s = decode_ascii(s)
+    elif isinstance(f, StringIO) and isinstance(s, np.ndarray):
+        # Workaround for StringIO/ndarray incompatibility
+        s = s.data
     f.write(s)
 
 
@@ -585,7 +677,7 @@ def _is_pseudo_unsigned(dtype):
 
 
 def _is_int(val):
-    return isinstance(val, (int, long, np.integer))
+    return isinstance(val, (integer_types, np.integer))
 
 
 def _str_to_num(val):

@@ -1,0 +1,53 @@
+.. doctest-skip-all
+
+.. _whatsnew-0.4:
+
+==========================
+What's New in Astropy 0.4?
+==========================
+
+Overview
+--------
+
+xxx
+
+Inspecting FITS headers from the command line
+---------------------------------------------
+
+The :ref:`astropy-io-fits` sub-package now provides a command line script for
+inspecting the header(s) of a FITS file. With Astropy 0.4 installed, run
+``fitsheader file.fits`` in your terminal to print the header information to
+the screen in a human-readable format. Run ``fitsheader --help`` to see the
+full usage documentation.
+
+Documentation/Sphinx extension changes
+--------------------------------------
+
+Starting in v0.4, astropy documentation will now show the full name of functions
+and classes prefixed by the intended user-facing location.  This is in contrast
+to previous versions, which pointed to the actual implementation module, rather
+than the intended public API location.
+
+This will affect URLs pointing to specific documentation pages.  For example,
+this URL points to the v0.3 location of the
+`astropy.cosmology.luminosity_distance` function:
+http://docs.astropy.org/en/v0.3/api/astropy.cosmology.funcs.luminosity_distance.html
+while the appropriate URL for v0.4 and later is:
+http://docs.astropy.org/en/v0.4/api/astropy.cosmology.luminosity_distance.html
+
+Deprecation and backward-incompatible changes
+---------------------------------------------
+
+- ``Quantity`` comparisons with ``==`` or ``!=`` now always return ``True``
+  or ``False``, even if units do not match (for which case a ``UnitsError``
+  used to be raised).  [#2328]
+
+- The functional interface for `astropy.cosmology` (e.g.
+  ``cosmology.H(0.5)`` is now deprecated in favor of the objected-oriented
+  approach (`WMAP9.H(0.5)`). [#2343]
+
+- The `coordinates` package has undergone large changes for implementing the
+  `APE5 <https://github.com/astropy/astropy-APEs/blob/master/APE5.rst>`_ plan
+  for the package.  Pre-v0.4 coordinates may no longer work, and should be
+  adapted to the new framework.  From this point on, major changes to the
+  coordinates classes are not expected.  [#2422]

@@ -8,30 +8,7 @@ ui.py:
 :Author: Tom Aldcroft (aldcroft@head.cfa.harvard.edu)
 """
 
-## Copyright (c) 2010, Smithsonian Astrophysical Observatory
-## All rights reserved.
-##
-## Redistribution and use in source and binary forms, with or without
-## modification, are permitted provided that the following conditions are met:
-##     * Redistributions of source code must retain the above copyright
-##       notice, this list of conditions and the following disclaimer.
-##     * Redistributions in binary form must reproduce the above copyright
-##       notice, this list of conditions and the following disclaimer in the
-##       documentation and/or other materials provided with the distribution.
-##     * Neither the name of the Smithsonian Astrophysical Observatory nor the
-##       names of its contributors may be used to endorse or promote products
-##       derived from this software without specific prior written permission.
-##
-## THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-## ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-## WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-## DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
-## DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-## (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-## LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-## ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-## (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-## SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+from __future__ import absolute_import, division, print_function
 
 import re
 import os
@@ -44,6 +21,7 @@ from . import daophot
 from . import sextractor
 from . import ipac
 from . import latex
+from . import html
 
 from ...table import Table
 
@@ -200,17 +178,18 @@ def _guess(table, read_kwargs):
                 raise ValueError
             return dat
 
-        except (core.InconsistentTableError, ValueError, TypeError):
+        except (core.InconsistentTableError, ValueError, TypeError,
+                core.OptionalTableImportError):
             failed_kwargs.append(guess_kwargs)
-            pass
     else:
         # failed all guesses, try the original read_kwargs without column requirements
         try:
             reader = get_reader(**read_kwargs)
             return reader.read(table)
-        except (core.InconsistentTableError, ValueError):
+        except (core.InconsistentTableError, ValueError, ImportError,
+                                            core.OptionalTableImportError):
             failed_kwargs.append(read_kwargs)
-            lines = ['\nERROR: Unable to guess table for with the guesses listed below:']
+            lines = ['\nERROR: Unable to guess table format with the guesses listed below:']
             for kwargs in failed_kwargs:
                 sorted_keys = sorted([x for x in sorted(kwargs)
                                       if x not in ('Reader', 'Outputter')])
@@ -219,7 +198,7 @@ def _guess(table, read_kwargs):
                 kwargs_sorted = ((key, kwargs[key]) for key in sorted_keys)
                 keys_vals.extend(['%s: %s' % (key, repr(val)) for key, val in kwargs_sorted])
                 lines.append(' '.join(keys_vals))
-            lines.append('ERROR: Unable to guess table for with the guesses listed above.')
+            lines.append('ERROR: Unable to guess table format with the guesses listed above.')
             lines.append('Check the table and try with guess=False '
                          'and appropriate arguments to read()')
             raise core.InconsistentTableError('\n'.join(lines))
@@ -233,7 +212,8 @@ def _get_guess_kwargs_list():
                          dict(Reader=sextractor.SExtractor),
                          dict(Reader=ipac.Ipac),
                          dict(Reader=latex.Latex),
-                         dict(Reader=latex.AASTex)
+                         dict(Reader=latex.AASTex),
+                         dict(Reader=html.HTML)
                          ]
     for Reader in (basic.CommentedHeader, basic.Basic, basic.NoHeader):
         for delimiter in ("|", ",", " ", "\s"):

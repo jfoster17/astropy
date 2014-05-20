@@ -9,14 +9,14 @@ import logging
 import warnings
 from contextlib import contextmanager
 
-from .config import ConfigurationItem
-from . import config
+from . import config as _config
+from . import conf as _conf
 from .utils.compat import inspect_getmodule
 from .utils.console import color_print
 from .utils.misc import find_current_module
 from .utils.exceptions import AstropyWarning, AstropyUserWarning
 
-__all__ = ['log', 'AstropyLogger', 'LoggingError']
+__all__ = ['Conf', 'conf', 'log', 'AstropyLogger', 'LoggingError']
 
 
 # Initialize by calling _init_log()
@@ -39,39 +39,53 @@ class _AstLogIPYExc(Exception):
     """
 
 
-# Read in configuration
-LOG_LEVEL = ConfigurationItem('log_level', 'INFO',
-                              "Threshold for the logging messages. Logging "
-                              "messages that are less severe than this level "
-                              "will be ignored. The levels are 'DEBUG', "
-                              "'INFO', 'WARNING', 'ERROR'")
+class Conf(_config.ConfigNamespace):
+    """
+    Configuration parameters for `astropy.logger`.
+    """
+    log_level = _config.ConfigItem(
+        'INFO',
+        "Threshold for the logging messages. Logging "
+        "messages that are less severe than this level "
+        "will be ignored. The levels are ``'DEBUG'``, "
+        "``'INFO'``, ``'WARNING'``, ``'ERROR'``.")
+    log_warnings = _config.ConfigItem(
+        True,
+        "Whether to log `warnings.warn` calls.")
+    log_exceptions = _config.ConfigItem(
+        False,
+        "Whether to log exceptions before raising "
+        "them.")
+    log_to_file = _config.ConfigItem(
+        False,
+        "Whether to always log messages to a log "
+        "file.")
+    log_file_path = _config.ConfigItem(
+        '',
+        "The file to log messages to. When ``''``, "
+        "it defaults to a file ``'astropy.log'`` in "
+        "the astropy config directory.")
+    log_file_level = _config.ConfigItem(
+        'INFO',
+        "Threshold for logging messages to "
+        "`log_file_path`.")
+    log_file_format = _config.ConfigItem(
+        "%(asctime)r, "
+        "%(origin)r, %(levelname)r, %(message)r",
+        "Format for log file entries.")
+conf = Conf()
 
-USE_COLOR = ConfigurationItem('use_color', True,
-                              "Whether to use color for the level names")
 
-LOG_WARNINGS = ConfigurationItem('log_warnings', True,
-                                 "Whether to log warnings.warn calls")
-
-LOG_EXCEPTIONS = ConfigurationItem('log_exceptions', False,
-                                   "Whether to log exceptions before raising "
-                                   "them")
-
-LOG_TO_FILE = ConfigurationItem('log_to_file', False,
-                                "Whether to always log messages to a log "
-                                "file")
-
-LOG_FILE_PATH = ConfigurationItem('log_file_path', '',
-                                  "The file to log messages to. When '', "
-                                  "it defaults to a file 'astropy.log' in "
-                                  "the astropy config directory.")
-
-LOG_FILE_LEVEL = ConfigurationItem('log_file_level', 'INFO',
-                                   "Threshold for logging messages to "
-                                   "log_file_path")
-
-LOG_FILE_FORMAT = ConfigurationItem('log_file_format', "%(asctime)r, "
-                                    "%(origin)r, %(levelname)r, %(message)r",
-                                    "Format for log file entries")
+LOG_LEVEL = _config.ConfigAlias('0.4', 'LOG_LEVEL', 'log_level')
+USE_COLOR = _config.ConfigAlias(
+    '0.4', 'USE_COLOR', 'use_color', 'astropy.logger', 'astropy')
+LOG_WARNINGS = _config.ConfigAlias('0.4', 'LOG_WARNINGS', 'log_warnings')
+LOG_EXCEPTIONS = _config.ConfigAlias('0.4', 'LOG_EXCEPTIONS', 'log_exceptions')
+LOG_TO_FILE = _config.ConfigAlias('0.4', 'LOG_TO_FILE', 'log_to_file')
+LOG_FILE_PATH = _config.ConfigAlias('0.4', 'LOG_FILE_PATH', 'log_file_path')
+LOG_FILE_LEVEL = _config.ConfigAlias('0.4', 'LOG_FILE_LEVEL', 'log_file_level')
+LOG_FILE_FORMAT = _config.ConfigAlias(
+    '0.4', 'LOG_FILE_FORMAT', 'log_file_format')
 
 
 def _init_log():
@@ -355,30 +369,13 @@ class AstropyLogger(Logger):
         '''
         Enable colorized output
         '''
-        self._use_color = True
+        _conf.use_color = True
 
     def disable_color(self):
         '''
         Disable colorized output
         '''
-        self._use_color = False
-
-    def _stream_formatter(self, record):
-        '''
-        The formatter for standard output
-        '''
-        if record.levelno < logging.DEBUG or not self._use_color:
-            print(record.levelname, end='')
-        elif(record.levelno < logging.INFO):
-            color_print(record.levelname, 'magenta', end='')
-        elif(record.levelno < logging.WARN):
-            color_print(record.levelname, 'green', end='')
-        elif(record.levelno < logging.ERROR):
-            color_print(record.levelname, 'brown', end='')
-        else:
-            color_print(record.levelname, 'red', end='')
-        record.message = "{0} [{1:s}]".format(record.msg, record.origin)
-        print(": " + record.message)
+        _conf.use_color = False
 
     @contextmanager
     def log_to_file(self, filename, filter_level=None, filter_origin=None):
@@ -422,7 +419,7 @@ class AstropyLogger(Logger):
             fh.setLevel(filter_level)
         if filter_origin is not None:
             fh.addFilter(FilterOrigin(filter_origin))
-        f = logging.Formatter(LOG_FILE_FORMAT())
+        f = logging.Formatter(conf.log_file_format)
         fh.setFormatter(f)
         self.addHandler(fh)
         yield
@@ -482,6 +479,7 @@ class AstropyLogger(Logger):
         '''
         Reset logger to its initial state
         '''
+        from astropy import conf as astropy_conf
 
         # Reset any previously installed hooks
         if self.warnings_logging_enabled():
@@ -494,21 +492,16 @@ class AstropyLogger(Logger):
             self.removeHandler(handler)
 
         # Set levels
-        self.setLevel(LOG_LEVEL())
-        if USE_COLOR():
-            self.enable_color()
-        else:
-            self.disable_color()
+        self.setLevel(conf.log_level)
 
         # Set up the stdout handler
-        sh = logging.StreamHandler()
-        sh.emit = self._stream_formatter
+        sh = StreamHandler()
         self.addHandler(sh)
 
         # Set up the main log file handler if requested (but this might fail if
         # configuration directory or log file is not writeable).
-        if LOG_TO_FILE():
-            log_file_path = LOG_FILE_PATH()
+        if conf.log_to_file:
+            log_file_path = conf.log_file_path
 
             # "None" as a string because it comes from config
             try:
@@ -520,7 +513,7 @@ class AstropyLogger(Logger):
             try:
                 if log_file_path == '' or testing_mode:
                     log_file_path = os.path.join(
-                        config.get_config_dir(), "astropy.log")
+                        _config.get_config_dir(), "astropy.log")
                 else:
                     log_file_path = os.path.expanduser(log_file_path)
 
@@ -530,15 +523,15 @@ class AstropyLogger(Logger):
                     'log file {0!r} could not be opened for writing: '
                     '{1}'.format(log_file_path, unicode(e)), RuntimeWarning)
             else:
-                formatter = logging.Formatter(LOG_FILE_FORMAT())
+                formatter = logging.Formatter(conf.log_file_format)
                 fh.setFormatter(formatter)
-                fh.setLevel(LOG_FILE_LEVEL())
+                fh.setLevel(conf.log_file_level)
                 self.addHandler(fh)
 
-        if LOG_WARNINGS():
+        if conf.log_warnings:
             self.enable_warnings_logging()
 
-        if LOG_EXCEPTIONS():
+        if conf.log_exceptions:
             self.enable_exception_logging()
 
 
@@ -551,9 +544,13 @@ def _checkLevel(level):
     if isinstance(level, int):
         rv = level
     elif str(level) == level:
-        if level not in logging._levelNames:
+        if sys.version_info[:2] >= (3, 4):
+            names = logging._nameToLevel
+        else:
+            names = logging._levelNames
+        if level not in names:
             raise ValueError("Unknown level: %r" % level)
-        rv = logging._levelNames[level]
+        rv = names[level]
     else:
         raise TypeError("Level not an integer or a valid string: %r" % level)
     return rv
@@ -561,6 +558,36 @@ def _checkLevel(level):
 
 # We now have to be sure that we overload the setLevel in FileHandler, again
 # for compatibility with Python 2.6 and 3.1.
+
+
+class StreamHandler(logging.StreamHandler):
+    """
+    A specialized StreamHandler that logs INFO and DEBUG messages to
+    stdout, and all other messages to stderr.  Also provides coloring
+    of the output, if enabled in the parent logger.
+    """
+
+    def emit(self, record):
+        '''
+        The formatter for stderr
+        '''
+        if record.levelno <= logging.INFO:
+            stream = sys.stdout
+        else:
+            stream = sys.stderr
+
+        if record.levelno < logging.DEBUG or not _conf.use_color:
+            print(record.levelname, end='', file=stream)
+        elif(record.levelno < logging.INFO):
+            color_print(record.levelname, 'magenta', end='', file=stream)
+        elif(record.levelno < logging.WARN):
+            color_print(record.levelname, 'green', end='', file=stream)
+        elif(record.levelno < logging.ERROR):
+            color_print(record.levelname, 'brown', end='', file=stream)
+        else:
+            color_print(record.levelname, 'red', end='', file=stream)
+        record.message = "{0} [{1:s}]".format(record.msg, record.origin)
+        print(": " + record.message, file=stream)
 
 
 class FileHandler(logging.FileHandler):

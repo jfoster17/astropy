@@ -5,6 +5,8 @@
 Regression tests for the units.format package
 """
 
+# TEST_UNICODE_LITERALS
+
 from __future__ import (absolute_import, unicode_literals, division,
                         print_function)
 
@@ -181,16 +183,20 @@ def test_roundtrip():
 
 
 def test_roundtrip_vo_unit():
-    def _test_roundtrip_vo_unit(unit):
+    def _test_roundtrip_vo_unit(unit, skip_decompose):
         a = core.Unit(unit.to_string('vounit'), format='vounit')
-        b = core.Unit(unit.decompose().to_string('vounit'), format='vounit')
         assert_allclose(a.decompose().scale, unit.decompose().scale, rtol=1e-2)
+        if skip_decompose:
+            return
+        u = unit.decompose().to_string('vounit')
+        assert '  ' not in u
+        b = core.Unit(u, format='vounit')
         assert_allclose(b.decompose().scale, unit.decompose().scale, rtol=1e-2)
 
     x = u_format.VOUnit()
     for key, val in x._units.items():
         if isinstance(val, core.Unit) and not isinstance(val, core.PrefixUnit):
-            yield _test_roundtrip_vo_unit, val
+            yield _test_roundtrip_vo_unit, val, val in (u.mag, u.dB)
 
 
 def test_roundtrip_fits():
@@ -207,8 +213,11 @@ def test_roundtrip_fits():
 def test_roundtrip_cds():
     def _test_roundtrip_cds(unit):
         a = core.Unit(unit.to_string('cds'), format='cds')
-        b = core.Unit(unit.decompose().to_string('cds'), format='cds')
         assert_allclose(a.decompose().scale, unit.decompose().scale, rtol=1e-2)
+        try:
+            b = core.Unit(unit.decompose().to_string('cds'), format='cds')
+        except ValueError:  # skip mag: decomposes into dex, unknown to OGIP
+            return
         assert_allclose(b.decompose().scale, unit.decompose().scale, rtol=1e-2)
 
     x = u_format.CDS()
@@ -220,8 +229,11 @@ def test_roundtrip_cds():
 def test_roundtrip_ogip():
     def _test_roundtrip_ogip(unit):
         a = core.Unit(unit.to_string('ogip'), format='ogip')
-        b = core.Unit(unit.decompose().to_string('ogip'), format='ogip')
         assert_allclose(a.decompose().scale, unit.decompose().scale, rtol=1e-2)
+        try:
+            b = core.Unit(unit.decompose().to_string('ogip'), format='ogip')
+        except ValueError:  # skip mag: decomposes into dex, unknown to OGIP
+            return
         assert_allclose(b.decompose().scale, unit.decompose().scale, rtol=1e-2)
 
     x = u_format.OGIP()
@@ -265,24 +277,6 @@ def test_format_styles():
 
     for format_, s in format_s_pairs:
         yield _test_format_styles, format_, s
-
-def test_wcs_parse():
-    """
-    Tests that the output of to_string('fits') is also parsed by
-    wcslib.  Even if we deprecated access to wcslib's unit parser, we
-    may want to keep it around and hidden for this test.
-    """
-    def _test_wcs_parse(unit):
-        try:
-            fits_string = unit.decompose().to_string('fits')
-        except ValueError:
-            return
-        wcs.UnitConverter(fits_string, fits_string)
-
-    for key, val in u.__dict__.items():
-        if isinstance(val, core.Unit) and not isinstance(val, core.PrefixUnit):
-            yield _test_wcs_parse, val
-
 
 def test_flatten_to_known():
     myunit = u.def_unit("FOOBAR_One", u.erg / u.Hz)
@@ -357,3 +351,4 @@ def test_scaled_dimensionless():
 
     with pytest.raises(ValueError):
         u.Unit(0.1).to_string('vounit')
+\

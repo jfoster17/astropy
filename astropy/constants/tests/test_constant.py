@@ -1,4 +1,7 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
+
+# TEST_UNICODE_LITERALS
+
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 from ...extern import six
@@ -85,6 +88,18 @@ def test_g0():
 
     # Check that its unit have the correct physical type
     assert g0.unit.physical_type == 'acceleration'
+
+
+def test_b_wien():
+    """b_wien should give the correct peak wavelength for
+    given blackbody temperature. The Sun is used in this test.
+
+    """
+    from .. import b_wien
+    from ... import units as u
+    t = 5778 * u.K
+    w = (b_wien / t).to(u.nm)
+    assert round(w.value) == 502
 
 
 def test_unit():

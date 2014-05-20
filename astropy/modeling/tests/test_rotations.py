@@ -1,5 +1,8 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
+from __future__ import (absolute_import, unicode_literals, division,
+                        print_function)
+
 from .. import models
 from numpy.testing import utils
 from ...tests.helper import pytest
@@ -38,7 +41,14 @@ def test_native_celestial_theta90():
     utils.assert_allclose(alpha, 182)
 
 
-def test_MatrixRotation2D():
-    model = models.MatrixRotation2D(angle=90)
+def test_Rotation2D():
+    model = models.Rotation2D(angle=90)
     x, y = model(1, 0)
-    utils.assert_allclose([x, y], [0, -1], atol=1e-10)
+    utils.assert_allclose([x, y], [0, 1], atol=1e-10)
+
+
+def test_Rotation2D_inverse():
+    model = models.Rotation2D(angle=234.23494)
+    inverse = model.inverse()
+    x, y = inverse(*model(1, 0))
+    utils.assert_allclose([x, y], [1, 0])

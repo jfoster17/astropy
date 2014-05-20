@@ -1,3 +1,4 @@
+.. doctest-skip-all
 .. _astropy-wcs:
 
 ***************************************
@@ -30,7 +31,7 @@ The basic workflow is as follows:
 
     1. ``from astropy import wcs``
 
-    2. Call the `~astropy.wcs.wcs.WCS` constructor with an
+    2. Call the `~astropy.wcs.WCS` constructor with an
        `astropy.io.fits` header and/or hdulist object.
 
     3. Optionally, if the FITS file uses any deprecated or
@@ -64,6 +65,13 @@ The basic workflow is as follows:
          coordinates to image coordinates.  Commonly used for narrow
          column correction.
 
+For example, to convert pixel coordinates to world coordinates::
+
+    >>> from astropy import wcs
+    >>> wcs = wcs.WCS('image.fits')
+    >>> lon, lat = wcs.all_pix2world(30, 40, 0)
+    >>> print(lon, lat)
+
 
 Using `astropy.wcs`
 ===================
@@ -90,7 +98,7 @@ saves those settings to a new FITS header.
 Validating the WCS keywords in a FITS file
 ------------------------------------------
 
-`astropy` includes a commandline tool, `wcslint` to check the WCS
+Astropy includes a commandline tool, ``wcslint`` to check the WCS
 keywords in a FITS file::
 
     > wcslint invalid.fits

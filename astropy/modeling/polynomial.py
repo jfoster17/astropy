@@ -4,15 +4,14 @@
 This module contains predefined polynomial models.
 """
 
-from __future__ import division
+from __future__ import (absolute_import, unicode_literals, division,
+                        print_function)
 
 import collections
 
-from textwrap import dedent
-
 import numpy as np
 
-from .core import ParametricModel, Model, SerialCompositeModel, format_input
+from .core import FittableModel, Model, SerialCompositeModel, format_input
 from .functional_models import Shift
 from .parameters import Parameter
 from .utils import poly_map_domain, comb
@@ -28,7 +27,7 @@ __all__ = [
 ]
 
 
-class PolynomialBase(ParametricModel):
+class PolynomialBase(FittableModel):
     """
     Base class for all polynomial-like models with an arbitrary number of
     parameters in the form of coeffecients.
@@ -42,7 +41,7 @@ class PolynomialBase(ParametricModel):
     _param_names = []
 
     linear = True
-    col_deriv = False
+    col_fit_deriv = False
 
     @lazyproperty
     def param_names(self):
@@ -82,16 +81,7 @@ class PolynomialBase(ParametricModel):
         else:
             super(PolynomialBase, self).__setattr__(attr, value)
 
-    def _deriv_with_constraints(self, params=None, x=None, y=None):
-        if y is None:
-            d = np.array(self.deriv(x=x))
-        else:
-            d = np.array(self.deriv(x=x, y=y))
 
-        if self.col_deriv:
-            return d[self._fit_param_indices]
-        else:
-            return d[:, self._fit_param_indices]
 
 class PolynomialModel(PolynomialBase):
     """
@@ -129,10 +119,13 @@ class PolynomialModel(PolynomialBase):
 
             self._validate_params(**params)
 
-        super(PolynomialModel, self).__init__(param_dim=param_dim)
+        super(PolynomialModel, self).__init__(param_dim=param_dim, **params)
 
-        for name, value in params.items():
-            setattr(self, name, value)
+    def __repr__(self):
+        return self._format_repr([self.degree])
+
+    def __str__(self):
+        return self._format_str([('Degree', self.degree)])
 
     @property
     def degree(self):
@@ -179,7 +172,9 @@ class PolynomialModel(PolynomialBase):
 
     def _validate_params(self, **params):
         numcoeff = self._order
-        assert(len(params) == numcoeff)
+        if len(params) != numcoeff:
+            raise TypeError('%d parameter(s) provided but %d expected' %
+                            (len(params), numcoeff))
         valid_params = set(self._param_names)
         provided_params = set(params)
         diff = valid_params.difference(provided_params)
@@ -267,10 +262,16 @@ class OrthoPolynomialBase(PolynomialBase):
 
             self._validate_params(**params)
 
-        super(OrthoPolynomialBase, self).__init__(param_dim=param_dim)
+        super(OrthoPolynomialBase, self).__init__(param_dim=param_dim,
+                                                  **params)
 
-        for name, value in params.items():
-            setattr(self, name, value)
+    def __repr__(self):
+        return self._format_repr([self.x_degree, self.y_degree])
+
+    def __str__(self):
+        return self._format_str(
+            [('X-Degree', self.x_degree),
+             ('Y-Degree', self.y_degree)])
 
     def get_num_coeff(self):
         """
@@ -286,7 +287,9 @@ class OrthoPolynomialBase(PolynomialBase):
 
     def _validate_params(self, **params):
         numcoeff = self.get_num_coeff()
-        assert(len(params) == numcoeff)
+        if len(params) != numcoeff:
+            raise TypeError('%d parameter(s) provided but %d expected' %
+                            (len(params), numcoeff))
 
     def _invlex(self):
         # TODO: This is a very slow way to do this; fix it and related methods
@@ -375,8 +378,8 @@ class OrthoPolynomialBase(PolynomialBase):
         y : scalar, lis or array
         """
 
-        assert x.shape == y.shape, \
-            "Expected input arrays to have the same shape"
+        if x.shape != y.shape:
+            raise ValueError("Expected input arrays to have the same shape")
         if self.x_domain is not None:
             x = poly_map_domain(x, self.x_domain, self.x_window)
         if self.y_domain is not None:
@@ -435,7 +438,7 @@ class Chebyshev1D(PolynomialModel):
                 c1 = tmp + c1 * x2
         return c0 + c1 * x
 
-    def deriv(self, x, *params):
+    def fit_deriv(self, x, *params):
         """
         Computes the Vandermonde matrix.
 
@@ -523,7 +526,7 @@ class Legendre1D(PolynomialModel):
                 c1 = tmp + (c1 * x * (2 * nd - 1)) / nd
         return c0 + c1 * x
 
-    def deriv(self, x, *params):
+    def fit_deriv(self, x, *params):
         """
         Computes the Vandermonde matrix.
 
@@ -590,7 +593,7 @@ class Polynomial1D(PolynomialModel):
                                            n_outputs=1,
                                            param_dim=param_dim, **params)
 
-    def deriv(self, x, *params):
+    def fit_deriv(self, x, *params):
         """
         Computes the Vandermonde matrix.
 
@@ -697,7 +700,7 @@ class Polynomial2D(PolynomialModel):
             r0 = coeff[n + 1]
         return r0 + r1 + r2
 
-    def deriv(self, x, y, *params):
+    def fit_deriv(self, x, y, *params):
         """
         Computes the Vandermonde matrix.
 
@@ -762,8 +765,8 @@ class Polynomial2D(PolynomialModel):
         """
 
         invcoeff = self.invlex_coeff()
-        assert x.shape == y.shape, \
-            "Expected input arrays to have the same shape"
+        if x.shape != y.shape:
+            raise ValueError("Expected input arrays to have the same shape")
 
         return self.mhorner(x, y, invcoeff)
 
@@ -826,7 +829,7 @@ class Chebyshev2D(OrthoPolynomialBase):
             kfunc[n] = 2 * y * kfunc[n - 1] - kfunc[n - 2]
         return kfunc
 
-    def deriv(self, x, y, *params):
+    def fit_deriv(self, x, y, *params):
         """
         Derivatives with respect to the coefficients.
 
@@ -941,7 +944,7 @@ class Legendre2D(OrthoPolynomialBase):
                                   (n - 1) * kfunc[n + x_terms - 2]) / (n)
         return kfunc
 
-    def deriv(self, x, y, *params):
+    def fit_deriv(self, x, y, *params):
         """
         Derivatives with repect to the coefficients.
         This is an array with Legendre polynomials:
@@ -990,7 +993,7 @@ class Legendre2D(OrthoPolynomialBase):
         return np.rollaxis(d, 0, d.ndim)
 
 
-class _SIP1D(Model):
+class _SIP1D(PolynomialBase):
     """
     This implements the Simple Imaging Polynomial Model (SIP) in 1D.
 
@@ -1029,42 +1032,18 @@ class _SIP1D(Model):
 
             self._validate_params(ndim=2, **params)
 
-        super(_SIP1D, self).__init__(param_dim=param_dim, **params)
+        super(_SIP1D, self).__init__(param_dim=param_dim)
+
+        for name, value in params.items():
+            setattr(self, name, value)
 
     def __repr__(self):
-        fmt = """
-        Model: {0}
-        order: {1}
-        coeff_prefix: {2}
-        param_dim: {3}
-        params: {4}
-        """.format(
-              self.__class__.__name__,
-              self.order,
-              self.coeff_prefix,
-              self.param_dim,
-              indent('\n'.join('{0}: {1}'.format(n, getattr(self, '_' + n))
-                     for n in self.param_names), width=19))
-
-        return dedent(fmt[1:])
+        return self._format_repr(args=[self.order, self.coeff_prefix])
 
     def __str__(self):
-        fmt = """
-        Model: {0}
-        order: {1}
-        coeff_prefix: {2}
-        Parameter sets: {3}
-        Parameters:
-                   {3}
-        """.format(
-              self.__class__.__name__,
-              self.order,
-              self.coeff_prefix,
-              self.param_dim,
-              indent('\n'.join('{0}: {1}'.format(n, getattr(self, '_' + n))
-                     for n in self.param_names), width=19))
-
-        return dedent(fmt[1:])
+        return self._format_str(
+            [('Order', self.order),
+             ('Coeff. Prefix', self.coeff_prefix)])
 
     def get_num_coeff(self, ndim):
         """
@@ -1074,8 +1053,9 @@ class _SIP1D(Model):
         if self.order < 2 or self.order > 9:
             raise ValueError("Degree of polynomial must be 2< deg < 9")
 
-        nmixed = comb(self.order - 1, ndim)
-        numc = self.order * ndim + nmixed + 1
+        nmixed = comb(self.order, ndim)
+        # remove 3 terms because SIP deg >= 2
+        numc = self.order * ndim + nmixed - 2
         return numc
 
     def _generate_coeff_names(self, coeff_prefix):
@@ -1092,27 +1072,29 @@ class _SIP1D(Model):
 
     def _validate_params(self, ndim, **params):
         numcoeff = self.get_num_coeff(ndim)
-        assert(len(params) == numcoeff)
+        if len(params) != numcoeff:
+            raise TypeError('%d parameter(s) provided but %d expected' %
+                            (len(params), numcoeff))
 
     def _coef_matrix(self, coeff_prefix):
         mat = np.zeros((self.order + 1, self.order + 1))
         for i in range(2, self.order + 1):
-            attr = '_{0}_{1}_{2}'.format(coeff_prefix, i, 0)
+            attr = '{0}_{1}_{2}'.format(coeff_prefix, i, 0)
             mat[i, 0] = getattr(self, attr).value
         for i in range(2, self.order + 1):
-            attr = '_{0}_{1}_{2}'.format(coeff_prefix, 0, i)
+            attr = '{0}_{1}_{2}'.format(coeff_prefix, 0, i)
             mat[0, i] = getattr(self, attr).value
         for i in range(1, self.order):
             for j in range(1, self.order):
                 if i + j < self.order + 1:
-                    attr = '_{0}_{1}_{2}'.format(coeff_prefix, i, j)
+                    attr = '{0}_{1}_{2}'.format(coeff_prefix, i, j)
                     mat[i, j] = getattr(self, attr).value
         return mat
 
     def _eval_sip(self, x, y, coef):
         x = np.asarray(x, dtype=np.float64)
         y = np.asarray(y, dtype=np.float64)
-        if self.coeff_prefix == 'a':
+        if self.coeff_prefix == 'A':
             result = np.zeros(x.shape)
         else:
             result = np.zeros(y.shape)
@@ -1128,7 +1110,7 @@ class _SIP1D(Model):
         return self._eval_sip(x, y, mcoef)
 
 
-class _SIPModel(SerialCompositeModel):
+class SIP(Model):
     """
     Simple Imaging Polynomial (SIP) model.
 
@@ -1171,137 +1153,91 @@ class _SIPModel(SerialCompositeModel):
     def __init__(self, crpix, a_order, a_coeff, b_order, b_coeff,
                  ap_order=None, ap_coeff=None, bp_order=None, bp_coeff=None,
                  param_dim=1):
-        self.crpix = crpix
-        self.a_order = a_order
-        self.b_order = b_order
-        self.a_coeff = a_coeff
-        self.b_coeff = b_coeff
-        self.ap_order = ap_order
-        self.bp_order = bp_order
-        self.ap_coeff = ap_coeff
-        self.bp_coeff = bp_coeff
+        self._crpix = crpix
+        self._a_order = a_order
+        self._b_order = b_order
+        self._a_coeff = a_coeff
+        self._b_coeff = b_coeff
+        self._ap_order = ap_order
+        self._bp_order = bp_order
+        self._ap_coeff = ap_coeff
+        self._bp_coeff = bp_coeff
         self.shift_a = Shift(-crpix[0])
         self.shift_b = Shift(-crpix[1])
         self.sip1d_a = _SIP1D(a_order, coeff_prefix='A',
                               param_dim=param_dim, **a_coeff)
         self.sip1d_b = _SIP1D(b_order, coeff_prefix='B',
                               param_dim=param_dim, **b_coeff)
-        if (ap_order is not None and ap_coeff is not None and
-                bp_order is not None and bp_coeff is not None):
-            self.sip1d_ap = _SIP1D(ap_order, coeff_prefix='AP', **ap_coeff)
-            self.sip1d_bp = _SIP1D(bp_order, coeff_prefix='BP', **bp_coeff)
-        else:
-            self.sip1d_ap = None
-            self.sip1d_bp = None
-
-        super(_SIPModel, self).__init__([self.shift_a, self.shift_b,
-                                         self.sip1d_a, self.sip1d_b])
-        
-
-class SIP(_SIPModel):
-    def __init__(self, crpix, a_order, a_coeff, b_order, b_coeff,
-                 ap_order=None, ap_coeff=None, bp_order=None, bp_coeff=None,
-                 param_dim=1):
-
-        super(SIP, self).__init__(crpix, a_order, a_coeff,
-                                  b_order, b_coeff, ap_order, ap_coeff,
-                                  bp_order, bp_coeff, param_dim=1)
-
-    def inverse(self):
-        if (self.ap_order is not None and self.ap_coeff is not None and
-                self.bp_order is not None and self.bp_coeff is not None):
-            return InverseSIP(self.crpix, self.a_order, self.a_coeff,
-                              self.b_order, self.b_coeff,
-                              self.ap_order, self.ap_coeff,
-                              self.bp_order, self.bp_coeff)
-        else:
-            raise NotImplementedError("An analytical inverse transform has "
-                                      "not been implemented for this model.")
+        super(SIP, self).__init__(param_dim=param_dim)
 
     def __repr__(self):
-        models = [self.shift_a, self.shift_b, self.sip1d_a, self.sip1d_b]
-        fmt = """
-            Model:  {0}
-            """.format(self.__class__.__name__)
-        fmt1 = " %s  " * len(models) % tuple([repr(model) for model in models])
-        fmt = fmt + fmt1
-        return fmt
+        return '<{0}({1!r})>'.format(self.__class__.__name__,
+            [self.shift_a, self.shift_b, self.sip1d_a, self.sip1d_b])
 
     def __str__(self):
-        models = [self.shift_a, self.shift_b, self.sip1d_a, self.sip1d_b]
-        fmt = """
-            Model:  {0}
-            """.format(self.__class__.__name__)
-        fmt1 = " %s  " * len(models) % tuple([str(model) for model in models])
-        fmt = fmt + fmt1
-        return fmt
+        parts = ['Model: {0}'.format(self.__class__.__name__)]
+        for model in [self.shift_a, self.shift_b, self.sip1d_a, self.sip1d_b]:
+            parts.append(indent(str(model), width=4))
+            parts.append('')
+
+        return '\n'.join(parts)
+
+    def inverse(self):
+        if (self._ap_order is not None and self._ap_coeff is not None and
+            self._bp_order is not None and self._bp_coeff is not None):
+            return InverseSIP(self._ap_order, self._ap_coeff,
+                              self._bp_order, self._bp_coeff)
+        else:
+            raise NotImplementedError("SIP inverse coefficients are not available.")
 
     def __call__(self, x, y):
-        """
-        Transforms data using this model.
+        u = self.shift_a(x)
+        v = self.shift_b(y)
+        f = self.sip1d_a(u, v)
+        g = self.sip1d_b(u, v)
+        return f, g
 
-        Parameters
-        ----------
-        x : scalar, list, array
-            input
-        y : scalar, list or array
-            input
-        """
-        x = self.shift_a(x)
-        y = self.shift_b(y)
-        x1 = self.sip1d_a(x, y)
-        y1 = self.sip1d_b(x, y)
+
+class InverseSIP(Model):
+
+    n_inputs = 2
+    n_outputs = 2
+
+    def __init__(self, ap_order, ap_coeff, bp_order, bp_coeff,
+                 param_dim=1):
+        self._ap_order = ap_order
+        self._bp_order = bp_order
+        self._ap_coeff = ap_coeff
+        self._bp_coeff = bp_coeff
+
+        # define the 0th term in order to use Polynomial2D
+        ap_coeff.setdefault('AP_0_0', 0)
+        bp_coeff.setdefault('BP_0_0', 0)
+
+        ap_coeff_params = dict((k.replace('AP_', 'c'), v)
+                               for k, v in ap_coeff.items())
+        bp_coeff_params = dict((k.replace('BP_', 'c'), v)
+                               for k, v in bp_coeff.items())
+
+        self.sip1d_ap = Polynomial2D(degree=ap_order, param_dim=param_dim,
+                                     **ap_coeff_params)
+        self.sip1d_bp = Polynomial2D(degree=bp_order, param_dim=param_dim,
+                                     **bp_coeff_params)
+        super(InverseSIP, self).__init__(param_dim=param_dim)
+
+    def __call__(self, x, y):
+        x1 = self.sip1d_ap(x, y)
+        y1 = self.sip1d_bp(x, y)
         return x1, y1
 
-
-class InverseSIP(_SIPModel):
-    def __init__(self, crpix, a_order, a_coeff, b_order, b_coeff,
-                 ap_order, ap_coeff, bp_order, bp_coeff,
-                 param_dim=1):
-
-        super(InverseSIP, self).__init__(crpix, a_order, a_coeff,
-                                         b_order, b_coeff,
-                                         ap_order, ap_coeff,
-                                         bp_order, bp_coeff, param_dim=1)
-
-    def inverse(self):
-        if (self.a_order is not None and self.a_coeff is not None and
-                self.b_order is not None and self.bp_coeff is not None):
-            return SIP(self.crpix, self.a_order, self.a_coeff,
-                       self.b_order, self.b_coeff,
-                       self.ap_order, self.ap_coeff,
-                       self.bp_order, self.bp_coeff)
-        else:
-            raise NotImplementedError("An analytical inverse transform has "
-                                      "not been implemented for this model.")
-
-    def __call__(self, x, y):
-        if self.sip1d_ap is not None and self.sip1d_bp is not None:
-            x1 = self.sip1d_ap(x, y)
-            y1 = self.sip1d_bp(x, y)
-            x = self.shift_a.inverse()(x1)
-            y = self.shift_b.inverse()(y1)
-            return x, y
-        else:
-            raise NotImplementedError("An analytical inverse transform has "
-                                      "not been implemented for this model.")
-
     def __repr__(self):
-        models = [self.sip1d_ap, self.sip1d_bp, self.shift_a.inverse(),
-                  self.shift_b.inverse()]
-        fmt = """
-            Model:  {0}
-            """.format(self.__class__.__name__)
-        fmt1 = " %s  " * len(models) % tuple([repr(model) for model in models])
-        fmt = fmt + fmt1
-        return fmt
+        return '<{0}({1!r})>'.format(self.__class__.__name__,
+            [self.sip1d_ap, self.sip1d_bp])
 
     def __str__(self):
-        models = [self.sip1d_ap, self.sip1d_bp, self.shift_a.inverse(),
-                  self.shift_b.inverse()]
-        fmt = """
-            Model:  {0}
-            """.format(self.__class__.__name__)
-        fmt1 = " %s  " * len(models) % tuple([str(model) for model in models])
-        fmt = fmt + fmt1
-        return fmt
+        parts = ['Model: {0}'.format(self.__class__.__name__)]
+        for model in [self.sip1d_ap, self.sip1d_bp]:
+            parts.append(indent(str(model), width=4))
+            parts.append('')
+
+        return '\n'.join(parts)

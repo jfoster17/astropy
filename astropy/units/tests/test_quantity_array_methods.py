@@ -54,6 +54,27 @@ class TestQuantityArrayCopy(object):
         q2[10,0] = -9*u.m/u.s
         assert np.all(q2.flatten() == q)
 
+    def test_flat(self):
+        q = u.Quantity(np.arange(9.).reshape(3, 3), "m/s")
+        q_flat = q.flat
+        # check that a single item is a quantity (with the right value)
+        assert q_flat[8] == 8. * u.m / u.s
+        # and that getting a range works as well
+        assert np.all(q_flat[0:2] == np.arange(2.) * u.m / u.s)
+        # as well as getting items via iteration
+        q_flat_list = [_q for _q in q.flat]
+        assert np.all(u.Quantity(q_flat_list) ==
+                      u.Quantity([_a for _a in q.value.flat], q.unit))
+        # check that flat works like a view of the real array
+        q_flat[8] = -1. * u.km / u.s
+        assert q_flat[8] == -1. * u.km / u.s
+        assert q[2,2] == -1. * u.km / u.s
+        # while if one goes by an iterated item, a copy is made
+        q_flat_list[8] = -2 * u.km / u.s
+        assert q_flat_list[8] == -2. * u.km / u.s
+        assert q_flat[8] == -1. * u.km / u.s
+        assert q[2,2] == -1. * u.km / u.s
+
 
 class TestQuantityStatsFuncs(object):
     """
@@ -376,6 +397,30 @@ class TestArrayConversion(object):
         assert q2.unit == q1.unit
         assert all(q2.value == q1.value.diagonal())
 
+    def test_view(self):
+        q1 = np.array([1, 2, 3], dtype=np.int64) * u.m / u.km
+        q2 = q1.view(np.ndarray)
+        assert not hasattr(q2, 'unit')
+        q3 = q2.view(u.Quantity)
+        assert q3._unit is None
+        # MaskedArray copies and properties assigned in __dict__
+        q4 = np.ma.MaskedArray(q1)
+        assert q4._unit is q1._unit
+        q5 = q4.view(u.Quantity)
+        assert q5.unit is q1.unit
+
+    def test_slice_to_quantity(self):
+        """
+        Regression test for https://github.com/astropy/astropy/issues/2003
+        """
+
+        a = np.random.uniform(size=(10, 8))
+        x, y, z = a[:,1:4].T * u.km/u.s
+        total = np.sum(a[:, 1] * u.km / u.s - x)
+
+        assert isinstance(total, u.Quantity)
+        assert total == (0.0 * u.km / u.s)
+
     def test_byte_type_view_field_changes(self):
         q1 = np.array([1, 2, 3], dtype=np.int64) * u.m / u.km
         q2 = q1.byteswap()
@@ -384,8 +429,6 @@ class TestArrayConversion(object):
         q2 = q1.astype(np.float64)
         assert all(q2 == q1)
         assert q2.dtype == np.float64
-        q2 = q1.view(np.ndarray)
-        assert not hasattr(q2, 'unit')
         q2a = q1.getfield(np.int32, offset=0)
         q2b = q1.byteswap().getfield(np.int32, offset=4)
         assert q2a.unit == q1.unit

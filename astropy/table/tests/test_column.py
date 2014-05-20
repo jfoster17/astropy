@@ -1,5 +1,7 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
+# TEST_UNICODE_LITERALS
+
 import operator
 
 from distutils import version
@@ -12,13 +14,6 @@ from ... import table
 from ... import units as u
 
 NUMPY_LT_1P8 = [int(x) for x in np.__version__.split('.')[:2]] < [1, 8]
-
-
-@pytest.fixture(params=[table.Column, table.MaskedColumn])
-def Column(request):
-    # Fixture to run all the Column tests for both an unmasked (ndarray)
-    # and masked (MaskedArray) column.
-    return request.param
 
 
 class TestColumn():
@@ -71,13 +66,12 @@ class TestColumn():
 
     def test_format(self, Column):
         """Show that the formatted output from str() works"""
-        MAX_LINES_val = table.pprint.MAX_LINES()
-        table.pprint.MAX_LINES.set(7)
-        c1 = Column(np.arange(2000), name='a', dtype=float,
-                    format='%6.2f')
-        assert str(c1) == ('   a   \n-------\n   0.00\n'
-                           '   1.00\n    ...\n1998.00\n1999.00')
-        table.pprint.MAX_LINES.set(MAX_LINES_val)
+        from ... import conf
+        with conf.set_temp('max_lines', 7):
+            c1 = Column(np.arange(2000), name='a', dtype=float,
+                        format='%6.2f')
+            assert str(c1) == ('   a   \n-------\n   0.00\n'
+                               '   1.00\n    ...\n1998.00\n1999.00')
 
     def test_convert_numpy_array(self, Column):
         d = Column([1, 2, 3], name='a', dtype='i8')

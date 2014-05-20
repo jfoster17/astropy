@@ -8,33 +8,15 @@ ipac.py:
 :Author: Tom Aldcroft (aldcroft@head.cfa.harvard.edu)
 """
 
-##
-## Redistribution and use in source and binary forms, with or without
-## modification, are permitted provided that the following conditions are met:
-##     * Redistributions of source code must retain the above copyright
-##       notice, this list of conditions and the following disclaimer.
-##     * Redistributions in binary form must reproduce the above copyright
-##       notice, this list of conditions and the following disclaimer in the
-##       documentation and/or other materials provided with the distribution.
-##     * Neither the name of the Smithsonian Astrophysical Observatory nor the
-##       names of its contributors may be used to endorse or promote products
-##       derived from this software without specific prior written permission.
-##
-## THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-## ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-## WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-## DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
-## DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-## (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-## LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-## ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-## (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-## SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+from __future__ import absolute_import, division, print_function
 
 import re
 from collections import defaultdict
 from textwrap import wrap
 from warnings import warn
+
+from ...extern import six
+from ...extern.six.moves import zip
 
 from . import core
 from . import fixedwidth
@@ -81,10 +63,10 @@ class Ipac(fixedwidth.FixedWidth):
       >>> from astropy.io import ascii
       >>> filename = os.path.join(ascii.__path__[0], 'tests/t/ipac.dat')
       >>> data = ascii.read(filename)
-      >>> print data.meta['comments']
+      >>> print(data.meta['comments'])
       ['This is an example of a valid comment']
       >>> for name, keyword in data.meta['keywords'].items():
-      ...     print name, keyword['value']
+      ...     print(name, keyword['value'])
       ...
       intval 1
       floatval 2300.0
@@ -122,7 +104,7 @@ class Ipac(fixedwidth.FixedWidth):
     ----------
     definition : str, optional
         Specify the convention for characters in the data table that occur
-        directly below the pipe (`|`) symbol in the header column definition:
+        directly below the pipe (``|``) symbol in the header column definition:
 
           * 'ignore' - Any character beneath a pipe symbol is ignored (default)
           * 'right' - Character is associated with the column to the right
@@ -162,8 +144,8 @@ class Ipac(fixedwidth.FixedWidth):
                                           self.exclude_names, self.strict_names)
 
         # link information about the columns to the writer object (i.e. self)
-        self.header.cols = table.columns.values()
-        self.data.cols = table.columns.values()
+        self.header.cols = list(six.itervalues(table.columns))
+        self.data.cols = list(six.itervalues(table.columns))
 
         # Write header and data to lines list
         lines = []
@@ -191,7 +173,12 @@ class Ipac(fixedwidth.FixedWidth):
         # keep data_str_vals because they take some time to make
         data_str_vals = self.data.str_vals()
         for i, col in enumerate(table.columns.values()):
-            col.width = max([len(vals[i]) for vals in data_str_vals])
+            # FIXME: In Python 3.4, use max([], default=0).
+            # See: https://docs.python.org/3/library/functions.html#max
+            if data_str_vals:
+                col.width = max([len(vals[i]) for vals in data_str_vals])
+            else:
+                col.width = 0
 
         widths = [max(col.width, col.headwidth) for col in table.columns.values()]
         # then write table
@@ -310,12 +297,12 @@ class IpacHeader(fixedwidth.FixedWidthHeader):
                 # IPAC allows for continuation keywords, e.g.
                 # \SQL     = 'WHERE '
                 # \SQL     = 'SELECT (25 column names follow in next row.)'
-                if name in keywords and isinstance(val, basestring):
+                if name in keywords and isinstance(val, six.string_types):
                     prev_val = keywords[name]['value']
-                    if isinstance(prev_val, basestring):
+                    if isinstance(prev_val, six.string_types):
                         val = prev_val + val
 
-                table_meta['keywords'][name] = {'value': val}
+                keywords[name] = {'value': val}
             else:
                 # Comment is required to start with "\ "
                 if line.startswith('\\ '):
@@ -327,7 +314,7 @@ class IpacHeader(fixedwidth.FixedWidthHeader):
         """Initialize the header Column objects from the table ``lines``.
 
         Based on the previously set Header attributes find or create the column names.
-        Sets ``self.cols`` with the list of Columns.  
+        Sets ``self.cols`` with the list of Columns.
 
         :param lines: list of table lines
         :returns: list of table Columns
@@ -463,7 +450,7 @@ class IpacData(fixedwidth.FixedWidthData):
         # just to make sure
         self._set_col_formats()
         col_str_iters = [col.iter_str_vals() for col in self.cols]
-        for vals in core.izip(*col_str_iters):
+        for vals in zip(*col_str_iters):
             vals_list.append(vals)
 
         return vals_list

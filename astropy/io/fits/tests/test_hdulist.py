@@ -626,8 +626,17 @@ class TestHDUListFunctions(FitsTestCase):
                             c1 = hdul[idx].data[n]
                             c2 = hdul2[idx].data[n]
                             assert (c1 == c2).all()
+                    elif (any(dim == 0 for dim in hdul[idx].data.shape) or
+                          any(dim == 0 for dim in hdul2[idx].data.shape)):
+                        # For some reason some combinations of Python and Numpy
+                        # on Windows result in MemoryErrors when trying to work
+                        # on memmap arrays with more than one dimension but
+                        # some dimensions of size zero, so include a special
+                        # case for that
+                        return hdul[idx].data.shape == hdul2[idx].data.shape
                     else:
-                        assert (hdul[idx].data == hdul2[idx].data).all()
+                        np.testing.assert_array_equal(hdul[idx].data,
+                                                      hdul2[idx].data)
 
         for filename in glob.glob(os.path.join(self.data_dir, '*.fits')):
             if sys.platform == 'win32' and filename == 'zerowidth.fits':

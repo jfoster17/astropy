@@ -9,30 +9,11 @@ basic.py:
 :Author: Tom Aldcroft (aldcroft@head.cfa.harvard.edu)
 """
 
-##
-## Redistribution and use in source and binary forms, with or without
-## modification, are permitted provided that the following conditions are met:
-##     * Redistributions of source code must retain the above copyright
-##       notice, this list of conditions and the following disclaimer.
-##     * Redistributions in binary form must reproduce the above copyright
-##       notice, this list of conditions and the following disclaimer in the
-##       documentation and/or other materials provided with the distribution.
-##     * Neither the name of the Smithsonian Astrophysical Observatory nor the
-##       names of its contributors may be used to endorse or promote products
-##       derived from this software without specific prior written permission.
-##
-## THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-## ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-## WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-## DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
-## DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-## (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-## LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-## ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-## (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-## SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+from __future__ import absolute_import, division, print_function
 
 import re
+
+import numpy as np
 
 from . import core
 
@@ -168,6 +149,7 @@ class Tab(Basic):
         self.data.splitter.process_val = None
         self.data.splitter.skipinitialspace = False
 
+
 class Csv(Basic):
     """Read a CSV (comma-separated-values) file.
 
@@ -175,6 +157,22 @@ class Csv(Basic):
 
       num,ra,dec,radius,mag
       1,32.23222,10.1211,0.8,18.1
+      2,38.12321,-88.1321,2.2,17.0
+
+    Plain csv (comma separated value) files typically contain as many entries
+    as there are columns on each line. In contrast, common spreadsheed editors
+    stop writing if all remaining cells on a line are empty, which can lead to
+    lines where the rightmost entries are missing. This Reader can deal with
+    such files.
+    Masked values (indicated by an empty '' field value when reading) are
+    written out in the same way with an empty ('') field.  This is different
+    from the typical default for `io.ascii` in which missing values are
+    indicated by ``--``.
+
+    Example::
+
+      num,ra,dec,radius,mag
+      1,32.23222,10.1211
       2,38.12321,-88.1321,2.2,17.0
     """
     _format_name = 'csv'
@@ -205,8 +203,26 @@ class Csv(Basic):
         self.data.splitter.delimiter = ','
         self.header.splitter.delimiter = ','
         self.header.start_line = 0
-        self.data.start_line = 1 
-        return core.BaseReader.write(self, table=table)
+        self.data.start_line = 1
+        self.data.fill_values = [(core.masked, '')]
+
+    def inconsistent_handler(self, str_vals, ncols):
+        '''Adjust row if it is too short.
+
+        If a data row is shorter than the header, add empty values to make it the
+        right length.
+        Note that this will *not* be called if the row already matches the header.
+
+        :param str_vals: A list of value strings from the current row of the table.
+        :param ncols: The expected number of entries from the table header.
+        :returns:
+            list of strings to be parsed into data entries in the output table.
+        '''
+        if len(str_vals) < ncols:
+            str_vals.extend((ncols - len(str_vals)) * [''])
+
+        return str_vals
+
 
 class Rdb(Tab):
     """Read a tab-separated file with an extra line after the column definition

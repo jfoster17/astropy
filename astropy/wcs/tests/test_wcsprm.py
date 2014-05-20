@@ -1,6 +1,9 @@
+# -*- coding: utf-8 -*-
+
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import gc
 import locale
 import re
 
@@ -8,9 +11,10 @@ from numpy.testing import assert_array_equal
 import numpy as np
 
 from ...tests.helper import pytest, raises
+from ...io import fits
 from .. import wcs
 from .. import _wcs
-from ...utils.data import get_pkg_data_contents, get_pkg_data_fileobj
+from ...utils.data import get_pkg_data_contents, get_pkg_data_fileobj, get_pkg_data_filename
 from ... import units as u
 
 
@@ -637,7 +641,7 @@ def test_toheader():
 
 def test_velangl():
     w = _wcs.Wcsprm()
-    assert w.velangl == 0.0
+    assert np.isnan(w.velangl)
     w.velangl = 42.0
     assert w.velangl == 42.0
     del w.velangl
@@ -718,4 +722,40 @@ def test_locale():
 @raises(UnicodeEncodeError)
 def test_unicode():
     w = _wcs.Wcsprm()
-    w.alt = "\u2030"
+    w.alt = "‰"
+
+
+def test_sub_segfault():
+    # Issue #1960
+    header = fits.Header.fromtextfile(
+        get_pkg_data_filename('data/sub-segfault.hdr'))
+    w = wcs.WCS(header)
+    sub = w.sub([wcs.WCSSUB_CELESTIAL])
+    gc.collect()
+
+
+def test_bounds_check():
+    w = _wcs.Wcsprm()
+    w.bounds_check(False)
+
+
+def test_wcs_sub_error_message():
+    # Issue #1587
+    w = _wcs.Wcsprm()
+    with pytest.raises(TypeError) as e:
+        w.sub('latitude')
+    assert str(e).endswith("axes must None, a sequence or an integer")
+
+
+def test_compare():
+    header = get_pkg_data_contents('data/3d_cd.hdr', encoding='binary')
+    w = _wcs.Wcsprm(header)
+    w2 = _wcs.Wcsprm(header)
+
+    assert w == w2
+
+    w.equinox = 42
+    assert w == w2
+
+    assert not w.compare(0, w2)
+    assert w.compare(_wcs.WCSCOMPARE_ANCILLARY, w2)

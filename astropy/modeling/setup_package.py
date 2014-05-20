@@ -2,4 +2,11 @@
 
 
 def get_package_data():
-    return {'astropy.modeling.tests': ['data/*.fits', '../../wcs/tests/maps/*.hdr']}
+    return {
+        'astropy.modeling.tests': ['data/*.fits', 'data/*.hdr',
+                                   '../../wcs/tests/maps/*.hdr']
+    }
+
+
+def requires_2to3():
+    return False

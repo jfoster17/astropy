@@ -1,5 +1,6 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from __future__ import absolute_import, division, print_function, unicode_literals
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
 
 CONTACT = "Michael Droettboom"
 EMAIL = "mdroe@stsci.edu"
@@ -8,13 +9,14 @@ from distutils.core import Extension
 import io
 from os.path import join
 import os.path
+import shutil
 import sys
 
-from astropy import setup_helpers
+from astropy_helpers import setup_helpers
 from astropy.extern import six
 
 WCSROOT = os.path.relpath(os.path.dirname(__file__))
-WCSVERSION = "4.10"
+WCSVERSION = "4.20"
 
 
 def b(s):
@@ -26,7 +28,7 @@ if six.PY3:
         s = s.replace(b'\n', b'\\n')
         s = s.replace(b'\0', b'\\0')
         return s.decode('ascii')
-else:
+elif six.PY2:
     def string_escape(s):
         # string_escape has subtle differences with the escaping done in Python
         # 3 so correct for those too
@@ -137,10 +139,6 @@ its contents, edit astropy/wcs/docstrings.py
 #ifndef __DOCSTRINGS_H__
 #define __DOCSTRINGS_H__
 
-#if defined(_MSC_VER)
-void fill_docstrings(void);
-#endif
-
 """)
     for key in keys:
         val = docs[key]
@@ -165,32 +163,19 @@ MSVC, do not support string literals greater than 256 characters.
 #include <string.h>
 #include "astropy_wcs/docstrings.h"
 
-#if defined(_MSC_VER)
 """)
     for key in keys:
         val = docs[key]
-        c_file.write('char doc_{0}[{1}];\n'.format(key, len(val)))
+        c_file.write('char doc_{0}[{1}] = {{\n'.format(key, len(val)))
+        for i in range(0, len(val), 12):
+            section = val[i:i+12]
+            if six.PY2:
+                section = [ord(x) for x in section]
+            c_file.write('    ');
+            c_file.write(''.join('0x{0:02x}, '.format(x) for x in section))
+            c_file.write('\n')
 
-    c_file.write("\nvoid fill_docstrings(void)\n{\n")
-    for key in keys:
-        val = docs[key]
-        # For portability across various compilers, we need to fill the
-        # docstrings in 256-character chunks
-        for i in range(0, len(val), 256):
-            chunk = string_escape(val[i:i + 256]).replace('"', '\\"')
-            c_file.write('   strncpy(doc_{0} + {1}, "{2}", {3});\n'.format(
-                key, i, chunk, min(len(val) - i, 256)))
-        c_file.write("\n")
-    c_file.write("\n}\n\n")
-
-    c_file.write("#else /* UNIX */\n")
-
-    for key in keys:
-        val = docs[key]
-        c_file.write('char doc_{0}[{1}] = "{2}";\n\n'.format(
-            key, len(val), string_escape(val).replace('"', '\\"')))
-
-    c_file.write("#endif\n")
+        c_file.write("    };\n\n")
 
     setup_helpers.write_if_different(
         join(WCSROOT, 'src', 'docstrings.c'),
@@ -260,7 +245,6 @@ def get_extensions():
         'util.c',
         'wcslib_wrap.c',
         'wcslib_tabprm_wrap.c',
-        'wcslib_units_wrap.c',
         'wcslib_wtbarr_wrap.c']
     cfg['sources'].extend(join(WCSROOT, 'src', x) for x in astropy_wcs_files)
 
@@ -300,22 +284,42 @@ def get_extensions():
 def get_package_data():
     # Installs the testing data files
     api_files = [
+        'astropy_wcs.h',
         'astropy_wcs_api.h',
-        'wcsconfig.h',
-        'pyutil.h',
-        'util.h',
         'distortion.h',
+        'isnan.h',
         'pipeline.h',
-        'sip.h'
+        'pyutil.h',
+        'sip.h',
+        'util.h',
+        'wcsconfig.h',
         ]
     api_files = [join('include', 'astropy_wcs', x) for x in api_files]
     api_files.append(join('include', 'astropy_wcs_api.h'))
 
+    wcslib_headers = [
+        'cel.h',
+        'lin.h',
+        'prj.h',
+        'spc.h',
+        'spx.h',
+        'tab.h',
+        'wcs.h',
+        'wcserr.h',
+        'wcsmath.h',
+        'wcsprintf.h',
+        ]
+    for header in wcslib_headers:
+        shutil.copy(join('cextern', 'wcslib', 'C', header),
+                    join('astropy', 'wcs', 'include', 'wcslib', header))
+        api_files.append(join('include', 'wcslib', header))
+
     return {
         str('astropy.wcs.tests'): ['data/*.hdr', 'data/*.fits',
                                    'data/*.txt',
-                                   'maps/*.hdr', 'spectra/*.hdr'],
-        str('astropy.wcs'): api_files
+                                   'maps/*.hdr', 'spectra/*.hdr',
+                                   'extension/*.c'],
+        str('astropy.wcs'): api_files,
     }
 
 

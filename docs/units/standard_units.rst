@@ -23,7 +23,7 @@ irreducible units include:
 standard that are no longer recommended for use.)
 
 Units that involve combinations of fundamental units are instances of
-`~astropy.units.core.CompositeUnit`. In most cases, one does not need
+`~astropy.units.CompositeUnit`. In most cases, one does not need
 to worry about the various kinds of unit classes unless one wants to
 design a more complex case.
 
@@ -54,7 +54,7 @@ equal to `None`: that indicates that no unit was specified in the data
 or by the user.
 
 For convenience, there is a unit that is both dimensionless and
-unscaled: the `~astropy.units.core.dimensionless_unscaled` object::
+unscaled: the ``astropy.units.core.dimensionless_unscaled`` object::
 
    >>> from astropy import units as u
    >>> u.dimensionless_unscaled

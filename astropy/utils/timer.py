@@ -229,7 +229,7 @@ class RunTimePredictor(object):
 
         Parameters
         ----------
-        model : `astropy.modeling.core.Model`
+        model : `astropy.modeling.Model`
             Model for the expected trend of run time (Y-axis)
             w.r.t. :math:`\\textnormal{arg}^{\\textnormal{power}}` (X-axis).
             If `None`, will use `~astropy.modeling.polynomial.Polynomial1D`
@@ -249,7 +249,7 @@ class RunTimePredictor(object):
         Returns
         -------
         a : array_like
-            Fitted `~astropy.modeling.core.ParametricModel.parameters`.
+            Fitted `~astropy.modeling.FittableModel` parameters.
 
         Raises
         ------
@@ -318,7 +318,7 @@ class RunTimePredictor(object):
              save_as=''):  # pragma: no cover
         """Plot prediction.
 
-        .. note:: Uses :mod:`matplotlib`.
+        .. note:: Uses `matplotlib <http://matplotlib.sourceforge.net/>`_.
 
         Parameters
         ----------

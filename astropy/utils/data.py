@@ -24,38 +24,61 @@ import time
 from tempfile import NamedTemporaryFile, gettempdir
 from warnings import warn
 
-from ..config.configuration import ConfigurationItem
+from .. import config as _config
 from ..utils.exceptions import AstropyWarning
 
 
-__all__ = ['get_readable_fileobj', 'get_file_contents', 'get_pkg_data_fileobj',
-           'get_pkg_data_filename', 'get_pkg_data_contents',
-           'get_pkg_data_fileobjs', 'get_pkg_data_filenames', 'compute_hash',
-           'clear_download_cache', 'CacheMissingWarning',
-           'get_free_space_in_dir', 'check_free_space_in_dir', 'download_file',
-           'download_files_in_parallel']
+__all__ = [
+    'Conf', 'conf', 'get_readable_fileobj', 'get_file_contents',
+    'get_pkg_data_fileobj', 'get_pkg_data_filename',
+    'get_pkg_data_contents', 'get_pkg_data_fileobjs',
+    'get_pkg_data_filenames', 'compute_hash', 'clear_download_cache',
+    'CacheMissingWarning', 'get_free_space_in_dir',
+    'check_free_space_in_dir', 'download_file',
+    'download_files_in_parallel']
 
 
-DATAURL = ConfigurationItem(
-    'dataurl', 'http://data.astropy.org/', 'URL for astropy remote data site.')
-REMOTE_TIMEOUT = ConfigurationItem(
-    'remote_timeout', 3., 'Time to wait for remote data query (in seconds).')
-COMPUTE_HASH_BLOCK_SIZE = ConfigurationItem(
-    'hash_block_size', 2 ** 16,  # 64K
-    'Block size for computing MD5 file hashes.')
-DOWNLOAD_CACHE_BLOCK_SIZE = ConfigurationItem(
-    'download_block_size', 2 ** 16,  # 64K
-    'Number of bytes of remote data to download per step.')
-DOWNLOAD_CACHE_LOCK_ATTEMPTS = ConfigurationItem(
-    'download_cache_lock_attempts', 5, 'Number of times to try to get the lock ' +
-    'while accessing the data cache before giving up.')
-DELETE_TEMPORARY_DOWNLOADS_AT_EXIT = ConfigurationItem(
-    'delete_temporary_downloads_at_exit', True, 'If True, temporary download' +
-    ' files created when the cache is inacessible will be deleted at the end' +
-    ' of the python session.')
+class Conf(_config.ConfigNamespace):
+    """
+    Configuration parameters for `astropy.utils.data`.
+    """
+
+    dataurl = _config.ConfigItem(
+        'http://data.astropy.org/',
+        'URL for astropy remote data site.')
+    remote_timeout = _config.ConfigItem(
+        3.,
+        'Time to wait for remote data queries (in seconds).',
+        aliases=['astropy.coordinates.name_resolve.name_resolve_timeout'])
+    compute_hash_block_size = _config.ConfigItem(
+        2 ** 16,  # 64K
+        'Block size for computing MD5 file hashes.')
+    download_block_size = _config.ConfigItem(
+        2 ** 16,  # 64K
+        'Number of bytes of remote data to download per step.')
+    download_cache_lock_attempts = _config.ConfigItem(
+        5,
+        'Number of times to try to get the lock ' +
+        'while accessing the data cache before giving up.')
+    delete_temporary_downloads_at_exit = _config.ConfigItem(
+        True,
+        'If True, temporary download files created when the cache is '
+        'inaccessible will be deleted at the end of the python session.')
+conf = Conf()
 
 
-PY3K = sys.version_info[0] >= 3
+DATAURL = _config.ConfigAlias(
+    '0.4', 'DATAURL', 'dataurl')
+REMOTE_TIMEOUT = _config.ConfigAlias(
+    '0.4', 'REMOTE_TIMEOUT', 'remote_timeout')
+COMPUTE_HASH_BLOCK_SIZE = _config.ConfigAlias(
+    '0.4', 'COMPUTE_HASH_BLOCK_SIZE', 'compute_hash_block_size')
+DOWNLOAD_CACHE_BLOCK_SIZE = _config.ConfigAlias(
+    '0.4', 'DOWNLOAD_CACHE_BLOCK_SIZE', 'download_block_size')
+DOWNLOAD_CACHE_LOCK_ATTEMPTS = _config.ConfigAlias(
+    '0.4', 'DOWNLOAD_CACHE_LOCK_ATTEMPTS', 'download_cache_lock_attempts')
+DELETE_TEMPORARY_DOWNLOADS_AT_EXIT = _config.ConfigAlias(
+    '0.4', 'DELETE_TEMPORARY_DOWNLOADS_AT_EXIT', 'delete_temporary_downloads_at_exit')
 
 
 class CacheMissingWarning(AstropyWarning):
@@ -81,7 +104,7 @@ def _is_url(string):
     # we can't just check that url[0] is not an empty string, because
     # file paths in windows would return a non-empty scheme (e.g. e:\\
     # returns 'e').
-    return url[0].lower() in ['http', 'https', 'ftp']
+    return url[0].lower() in ['http', 'https', 'ftp', 'sftp', 'ssh', 'file']
 
 
 def _is_inside(path, parent_path):
@@ -122,17 +145,17 @@ def get_readable_fileobj(name_or_obj, encoding=None, cache=False,
 
     encoding : str, optional
         When `None` (default), returns a file-like object with a
-        `read` method that on Python 2.x returns `bytes` objects and
+        ``read`` method that on Python 2.x returns `bytes` objects and
         on Python 3.x returns `str` (`unicode`) objects, using
-        `locale.getpreferredencoding()` as an encoding.  This matches
-        the default behavior of the built-in `open` when no `mode`
+        `locale.getpreferredencoding` as an encoding.  This matches
+        the default behavior of the built-in `open` when no ``mode``
         argument is provided.
 
-        When `'binary'`, returns a file-like object where its `read`
+        When ``'binary'``, returns a file-like object where its ``read``
         method returns `bytes` objects.
 
         When another string, it is the name of an encoding, and the
-        file-like object's `read` method will return `str` (`unicode`)
+        file-like object's ``read`` method will return `str` (`unicode`)
         objects, decoded from binary using the given encoding.
 
     cache : bool, optional
@@ -162,7 +185,7 @@ def get_readable_fileobj(name_or_obj, encoding=None, cache=False,
 
     if remote_timeout is None:
         # use configfile default
-        remote_timeout = REMOTE_TIMEOUT()
+        remote_timeout = conf.remote_timeout
 
     # Get a file object to the content
     if isinstance(name_or_obj, six.string_types):
@@ -170,9 +193,9 @@ def get_readable_fileobj(name_or_obj, encoding=None, cache=False,
             name_or_obj = download_file(
                 name_or_obj, cache=cache, show_progress=show_progress,
                 timeout=remote_timeout)
-        if PY3K:
+        if six.PY3:
             fileobj = io.FileIO(name_or_obj, 'r')
-        else:
+        elif six.PY2:
             fileobj = open(name_or_obj, 'rb')
         close_fds.append(fileobj)
     else:
@@ -230,9 +253,9 @@ def get_readable_fileobj(name_or_obj, encoding=None, cache=False,
     # io.TextIOWrapper so read will return unicode based on the
     # encoding parameter.
 
-    if PY3K:
+    if six.PY3:
         needs_textio_wrapper = encoding != 'binary'
-    else:
+    elif six.PY2:
         needs_textio_wrapper = encoding != 'binary' and encoding is not None
 
     if needs_textio_wrapper:
@@ -246,9 +269,9 @@ def get_readable_fileobj(name_or_obj, encoding=None, cache=False,
             tmp.write(data)
             tmp.close()
             delete_fds.append(tmp)
-            if PY3K:
+            if six.PY3:
                 fileobj = io.FileIO(tmp.name, 'r')
-            else:
+            elif six.PY2:
                 fileobj = open(tmp.name, 'rb')
             close_fds.append(fileobj)
 
@@ -258,7 +281,7 @@ def get_readable_fileobj(name_or_obj, encoding=None, cache=False,
         # `io.FileIO` object in the first place, because we can't
         # get a raw file descriptor out of it on Python 2.x, which
         # is required for the XML iterparser.
-        if not PY3K and isinstance(fileobj, file):
+        if six.PY2 and isinstance(fileobj, file):
             fileobj = io.FileIO(fileobj.fileno())
 
         fileobj = io.BufferedReader(fileobj)
@@ -295,7 +318,7 @@ def get_file_contents(name_or_obj, encoding=None, cache=False):
     Returns
     -------
     content
-        The content of the file (as requested by `encoding`).
+        The content of the file (as requested by ``encoding``).
 
     """
     with get_readable_fileobj(name_or_obj, encoding, cache) as f:
@@ -315,7 +338,7 @@ def get_pkg_data_fileobj(data_name, encoding=None, cache=True):
             * The name of a data file included in the source
               distribution.  The path is relative to the module
               calling this function.  For example, if calling from
-              `astropy.pkname`, use ``'data/file.dat'`` to get the
+              ``astropy.pkname``, use ``'data/file.dat'`` to get the
               file in ``astropy/pkgname/data/file.dat``.  Double-dots
               can be used to go up a level.  In the same example, use
               ``'../data/file.dat'`` to get ``astropy/data/file.dat``.
@@ -329,17 +352,17 @@ def get_pkg_data_fileobj(data_name, encoding=None, cache=True):
 
     encoding : str, optional
         When `None` (default), returns a file-like object with a
-        `read` method that on Python 2.x returns `bytes` objects and
+        ``read`` method that on Python 2.x returns `bytes` objects and
         on Python 3.x returns `str` (`unicode`) objects, using
-        `locale.getpreferredencoding()` as an encoding.  This matches
-        the default behavior of the built-in `open` when no `mode`
+        `locale.getpreferredencoding` as an encoding.  This matches
+        the default behavior of the built-in `open` when no ``mode``
         argument is provided.
 
-        When `'binary'`, returns a file-like object where its `read`
+        When ``'binary'``, returns a file-like object where its ``read``
         method returns `bytes` objects.
 
         When another string, it is the name of an encoding, and the
-        file-like object's `read` method will return `str` (`unicode`)
+        file-like object's ``read`` method will return `str` (`unicode`)
         objects, decoded from binary using the given encoding.
 
     cache : bool
@@ -354,7 +377,7 @@ def get_pkg_data_fileobj(data_name, encoding=None, cache=True):
     -------
     fileobj : file-like
         An object with the contents of the data file available via
-        :func:`read`.  Can be used as part of a ``with`` statement,
+        ``read`` function.  Can be used as part of a ``with`` statement,
         automatically closing itself after the ``with`` block.
 
     Raises
@@ -402,7 +425,7 @@ def get_pkg_data_fileobj(data_name, encoding=None, cache=True):
     elif os.path.isfile(datafn):  # local file
         return get_readable_fileobj(datafn, encoding=encoding)
     else:  # remote file
-        return get_readable_fileobj(DATAURL() + datafn, encoding=encoding,
+        return get_readable_fileobj(conf.dataurl + datafn, encoding=encoding,
                                     cache=cache)
 
 
@@ -424,7 +447,7 @@ def get_pkg_data_filename(data_name, show_progress=True, remote_timeout=None):
             * The name of a data file included in the source
               distribution.  The path is relative to the module
               calling this function.  For example, if calling from
-              `astropy.pkname`, use ``'data/file.dat'`` to get the
+              ``astropy.pkname``, use ``'data/file.dat'`` to get the
               file in ``astropy/pkgname/data/file.dat``.  Double-dots
               can be used to go up a level.  In the same example, use
               ``'../data/file.dat'`` to get ``astropy/data/file.dat``.
@@ -441,8 +464,9 @@ def get_pkg_data_filename(data_name, show_progress=True, remote_timeout=None):
         from a remote server.  Default is `True`.
 
     timeout : float
-        Timeout for the requests in seconds (default is the configurable
-        REMOTE_TIMEOUT, which is 3s by default)
+        Timeout for the requests in seconds (default is the
+        configurable `astropy.utils.data.Conf.remote_timeout`, which
+        is 3s by default)
 
     Raises
     ------
@@ -455,7 +479,7 @@ def get_pkg_data_filename(data_name, show_progress=True, remote_timeout=None):
     -------
     filename : str
         A file path on the local file system corresponding to the data
-        requested in `data_name`.
+        requested in ``data_name``.
 
     Examples
     --------
@@ -489,14 +513,14 @@ def get_pkg_data_filename(data_name, show_progress=True, remote_timeout=None):
 
     if remote_timeout is None:
         # use configfile default
-        remote_timeout = REMOTE_TIMEOUT()
+        remote_timeout = conf.remote_timeout
 
     if data_name.startswith('hash/'):
         # first try looking for a local version if a hash is specified
         hashfn = _find_hash_fn(data_name[5:])
         if hashfn is None:
             return download_file(
-                DATAURL() + data_name, cache=True,
+                conf.dataurl + data_name, cache=True,
                 show_progress=show_progress,
                 timeout=remote_timeout)
         else:
@@ -510,7 +534,7 @@ def get_pkg_data_filename(data_name, show_progress=True, remote_timeout=None):
             return datafn
         else:  # remote file
             return download_file(
-                DATAURL() + data_name, cache=True,
+                conf.dataurl + data_name, cache=True,
                 show_progress=show_progress,
                 timeout=remote_timeout)
 
@@ -528,7 +552,7 @@ def get_pkg_data_contents(data_name, encoding=None, cache=True):
             * The name of a data file included in the source
               distribution.  The path is relative to the module
               calling this function.  For example, if calling from
-              `astropy.pkname`, use ``'data/file.dat'`` to get the
+              ``astropy.pkname``, use ``'data/file.dat'`` to get the
               file in ``astropy/pkgname/data/file.dat``.  Double-dots
               can be used to go up a level.  In the same example, use
               ``'../data/file.dat'`` to get ``astropy/data/file.dat``.
@@ -543,17 +567,17 @@ def get_pkg_data_contents(data_name, encoding=None, cache=True):
 
     encoding : str, optional
         When `None` (default), returns a file-like object with a
-        `read` method that on Python 2.x returns `bytes` objects and
+        ``read`` method that on Python 2.x returns `bytes` objects and
         on Python 3.x returns `str` (`unicode`) objects, using
-        `locale.getpreferredencoding()` as an encoding.  This matches
-        the default behavior of the built-in `open` when no `mode`
+        `locale.getpreferredencoding` as an encoding.  This matches
+        the default behavior of the built-in `open` when no ``mode``
         argument is provided.
 
-        When `'binary'`, returns a file-like object where its `read`
+        When ``'binary'``, returns a file-like object where its ``read``
         method returns `bytes` objects.
 
         When another string, it is the name of an encoding, and the
-        file-like object's `read` method will return `str` (`unicode`)
+        file-like object's ``read`` method will return `str` (`unicode`)
         objects, decoded from binary using the given encoding.
 
     cache : bool
@@ -599,7 +623,7 @@ def get_pkg_data_filenames(datadir, pattern='*'):
             * The name of a directory included in the source
               distribution.  The path is relative to the module
               calling this function.  For example, if calling from
-              `astropy.pkname`, use ``'data'`` to get the
+              ``astropy.pkname``, use ``'data'`` to get the
               files in ``astropy/pkgname/data``.
             * Remote URLs are not currently supported.
 
@@ -651,7 +675,7 @@ def get_pkg_data_fileobjs(datadir, pattern='*', encoding=None):
             * The name of a directory included in the source
               distribution.  The path is relative to the module
               calling this function.  For example, if calling from
-              `astropy.pkname`, use ``'data'`` to get the
+              ``astropy.pkname``, use ``'data'`` to get the
               files in ``astropy/pkgname/data``
             * Remote URLs are not currently supported
 
@@ -662,17 +686,17 @@ def get_pkg_data_fileobjs(datadir, pattern='*', encoding=None):
 
     encoding : str, optional
         When `None` (default), returns a file-like object with a
-        `read` method that on Python 2.x returns `bytes` objects and
+        ``read`` method that on Python 2.x returns `bytes` objects and
         on Python 3.x returns `str` (`unicode`) objects, using
-        `locale.getpreferredencoding()` as an encoding.  This matches
-        the default behavior of the built-in `open` when no `mode`
+        `locale.getpreferredencoding` as an encoding.  This matches
+        the default behavior of the built-in `open` when no ``mode``
         argument is provided.
 
-        When `'binary'`, returns a file-like object where its `read`
+        When ``'binary'``, returns a file-like object where its ``read``
         method returns `bytes` objects.
 
         When another string, it is the name of an encoding, and the
-        file-like object's `read` method will return `str` (`unicode`)
+        file-like object's ``read`` method will return `str` (`unicode`)
         objects, decoded from binary using the given encoding.
 
     Returns
@@ -706,7 +730,8 @@ def compute_hash(localfn):
 
     Typically, if you wish to write a test that requires a particular data
     file, you will want to submit that file to the astropy data servers, and
-    use e.g. ``get_pkg_data_filename('hash/a725fa6ba642587436612c2df0451956')``,
+    use
+    e.g. ``get_pkg_data_filename('hash/a725fa6ba642587436612c2df0451956')``,
     but with the hash for your file in place of the hash in the example.
 
     Parameters
@@ -717,16 +742,17 @@ def compute_hash(localfn):
     Returns
     -------
     md5hash : str
-        The hex digest of the MD5 hash for the contents of the `localfn` file.
+        The hex digest of the MD5 hash for the contents of the ``localfn``
+        file.
 
     """
 
     with open(localfn, 'rb') as f:
         h = hashlib.md5()
-        block = f.read(COMPUTE_HASH_BLOCK_SIZE())
+        block = f.read(conf.compute_hash_block_size)
         while block:
             h.update(block)
-            block = f.read(COMPUTE_HASH_BLOCK_SIZE())
+            block = f.read(conf.compute_hash_block_size)
 
     return h.hexdigest()
 
@@ -846,7 +872,7 @@ def check_free_space_in_dir(path, size):
                 path, human_file_size(size)))
 
 
-def download_file(remote_url, cache=False, show_progress=True, timeout=REMOTE_TIMEOUT()):
+def download_file(remote_url, cache=False, show_progress=True, timeout=None):
     """
     Accepts a URL, downloads and optionally caches the result
     returning the filename, with a name determined by the file's MD5
@@ -865,6 +891,10 @@ def download_file(remote_url, cache=False, show_progress=True, timeout=REMOTE_TI
         Whether to display a progress bar during the download (default
         is `True`)
 
+    timeout : float, optional
+        The timeout, in seconds.  Otherwise, use
+        `astropy.utils.data.Conf.remote_timeout`.
+
     Returns
     -------
     local_path : str
@@ -878,7 +908,14 @@ def download_file(remote_url, cache=False, show_progress=True, timeout=REMOTE_TI
 
     from ..utils.console import ProgressBarOrSpinner
 
+    if timeout is None:
+        timeout = conf.remote_timeout
+
     missing_cache = False
+
+    if timeout is None:
+        # use configfile default
+        timeout = REMOTE_TIMEOUT()
 
     if cache:
         try:
@@ -889,12 +926,19 @@ def download_file(remote_url, cache=False, show_progress=True, timeout=REMOTE_TI
             warn(CacheMissingWarning(msg + e.__class__.__name__ + estr))
             cache = False
             missing_cache = True  # indicates that the cache is missing to raise a warning later
+
+    if six.PY2 and isinstance(remote_url, six.text_type):
+        # shelve DBs don't accept unicode strings in Python 2
+        url_key = remote_url.encode('utf-8')
+    else:
+        url_key = remote_url
+
     try:
         if cache:
             # We don't need to acquire the lock here, since we are only reading
             with _open_shelve(urlmapfn, True) as url2hash:
-                if str(remote_url) in url2hash:
-                    return url2hash[str(remote_url)]
+                if url_key in url2hash:
+                    return url2hash[url_key]
 
         with contextlib.closing(urllib.request.urlopen(
                 remote_url, timeout=timeout)) as remote:
@@ -925,13 +969,13 @@ def download_file(remote_url, cache=False, show_progress=True, timeout=REMOTE_TI
                 with NamedTemporaryFile(delete=False) as f:
                     try:
                         bytes_read = 0
-                        block = remote.read(DOWNLOAD_CACHE_BLOCK_SIZE())
+                        block = remote.read(conf.download_block_size)
                         while block:
                             f.write(block)
                             hash.update(block)
                             bytes_read += len(block)
                             p.update(bytes_read)
-                            block = remote.read(DOWNLOAD_CACHE_BLOCK_SIZE())
+                            block = remote.read(conf.download_block_size)
                     except:
                         if os.path.exists(f.name):
                             os.remove(f.name)
@@ -944,11 +988,11 @@ def download_file(remote_url, cache=False, show_progress=True, timeout=REMOTE_TI
                     # We check now to see if another process has
                     # inadvertently written the file underneath us
                     # already
-                    if str(remote_url) in url2hash:
-                        return url2hash[str(remote_url)]
+                    if url_key in url2hash:
+                        return url2hash[url_key]
                     local_path = os.path.join(dldir, hash.hexdigest())
                     shutil.move(f.name, local_path)
-                    url2hash[str(remote_url)] = local_path
+                    url2hash[url_key] = local_path
             finally:
                 _release_download_cache_lock()
         else:
@@ -957,7 +1001,7 @@ def download_file(remote_url, cache=False, show_progress=True, timeout=REMOTE_TI
                 msg = ('File downloaded to temporary location due to problem '
                        'with cache directory and will not be cached.')
                 warn(CacheMissingWarning(msg, local_path))
-            if DELETE_TEMPORARY_DOWNLOADS_AT_EXIT():
+            if conf.delete_temporary_downloads_at_exit:
                 global _tempfilestodel
                 _tempfilestodel.append(local_path)
     except urllib.error.URLError as e:
@@ -980,7 +1024,7 @@ def _do_download_files_in_parallel(args):
 
 
 def download_files_in_parallel(urls, cache=False, show_progress=True,
-                               timeout=REMOTE_TIMEOUT()):
+                               timeout=None):
     """
     Downloads multiple files in parallel from the given URLs.  Blocks until
     all files have downloaded.  The result is a list of local file paths
@@ -998,9 +1042,9 @@ def download_files_in_parallel(urls, cache=False, show_progress=True,
         Whether to display a progress bar during the download (default
         is `True`)
 
-    timeout : float
-        Timeout for the requests in seconds (default is the configurable
-        REMOTE_TIMEOUT, which is 3s by default)
+    timeout : float, optional
+        Timeout for the requests in seconds (default is the
+        configurable `astropy.utils.data.Conf.remote_timeout`).
 
     Returns
     -------
@@ -1009,10 +1053,17 @@ def download_files_in_parallel(urls, cache=False, show_progress=True,
     """
     from .console import ProgressBar
 
+    if timeout is None:
+        timeout = conf.remote_timeout
+
     if show_progress:
         progress = sys.stdout
     else:
         progress = io.BytesIO()
+
+    if timeout is None:
+        # use configfile default
+        timeout = REMOTE_TIMEOUT()
 
     # Combine duplicate URLs
     combined_urls = list(set(urls))
@@ -1037,10 +1088,11 @@ def _deltemps():
 
     global _tempfilestodel
 
-    while len(_tempfilestodel) > 0:
-        fn = _tempfilestodel.pop()
-        if os.path.isfile(fn):
-            os.remove(fn)
+    if _tempfilestodel is not None:
+        while len(_tempfilestodel) > 0:
+            fn = _tempfilestodel.pop()
+            if os.path.isfile(fn):
+                os.remove(fn)
 
 
 def clear_download_cache(hashorurl=None):
@@ -1079,20 +1131,24 @@ def clear_download_cache(hashorurl=None):
             with _open_shelve(urlmapfn, True) as url2hash:
                 filepath = os.path.join(dldir, hashorurl)
                 assert _is_inside(filepath, dldir), \
-                       ("attempted to use clear_download_cache on a location" +
-                        " that's not inside the data cache directory")
+                       ("attempted to use clear_download_cache on a path "
+                        "outside the data cache directory")
+
+                # shelve DBs don't accept unicode strings as keys in Python 2
+                if six.PY2 and isinstance(hashorurl, six.text_type):
+                    hash_key = hashorurl.encode('utf-8')
+                else:
+                    hash_key = hashorurl
 
                 if os.path.exists(filepath):
                     for k, v in list(six.iteritems(url2hash)):
                         if v == filepath:
                             del url2hash[k]
                     os.unlink(filepath)
-
-                elif hashorurl in url2hash:
-                    filepath = url2hash[hashorurl]
-                    del url2hash[hashorurl]
+                elif hash_key in url2hash:
+                    filepath = url2hash[hash_key]
+                    del url2hash[hash_key]
                     os.unlink(filepath)
-
                 else:
                     msg = 'Could not find file or url {0}'
                     raise OSError(msg.format(hashorurl))
@@ -1145,9 +1201,9 @@ def _open_shelve(shelffn, withclosing=False):
     """
     import shelve
 
-    if not PY3K:  # pragma: py3
+    if six.PY2:
         shelf = shelve.open(shelffn, protocol=2)
-    else:  # pragma: py2
+    elif six.PY3:
         shelf = shelve.open(shelffn + '.db', protocol=2)
 
     if withclosing:
@@ -1165,7 +1221,7 @@ def _acquire_download_cache_lock():
     """
 
     lockdir = os.path.join(_get_download_cache_locs()[0], 'lock')
-    for i in range(DOWNLOAD_CACHE_LOCK_ATTEMPTS()):
+    for i in range(conf.download_cache_lock_attempts):
         try:
             os.mkdir(lockdir)
             #write the pid of this process for informational purposes

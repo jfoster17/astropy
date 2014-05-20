@@ -8,35 +8,17 @@ cds.py:
 :Author: Tom Aldcroft (aldcroft@head.cfa.harvard.edu)
 """
 
-##
-## Redistribution and use in source and binary forms, with or without
-## modification, are permitted provided that the following conditions are met:
-##     * Redistributions of source code must retain the above copyright
-##       notice, this list of conditions and the following disclaimer.
-##     * Redistributions in binary form must reproduce the above copyright
-##       notice, this list of conditions and the following disclaimer in the
-##       documentation and/or other materials provided with the distribution.
-##     * Neither the name of the Smithsonian Astrophysical Observatory nor the
-##       names of its contributors may be used to endorse or promote products
-##       derived from this software without specific prior written permission.
-##
-## THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-## ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-## WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-## DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
-## DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-## (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-## LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-## ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-## (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-## SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+from __future__ import absolute_import, division, print_function
 
 import fnmatch
 import itertools
 import re
+import os
 
 from . import core
 from . import fixedwidth
+
+from ...utils.compat import ignored
 
 
 __doctest_skip__ = ['*']
@@ -81,7 +63,8 @@ class CdsHeader(core.BaseHeader):
         # me file ``self.readme``.
         if self.readme and self.data.table_name:
             in_header = False
-            f = open(self.readme, "r")
+            readme_inputter = core.BaseInputter()
+            f = readme_inputter.get_lines(self.readme)
             # Header info is not in data lines but in a separate file.
             lines = []
             comment_lines = 0
@@ -109,12 +92,16 @@ class CdsHeader(core.BaseHeader):
                                 break
 
             else:
-                raise core.InconsistentTableError("Cant' find table {0} in {1}".format(
+                raise core.InconsistentTableError("Can't find table {0} in {1}".format(
                     self.data.table_name, self.readme))
-            f.close()
+
+        found_line = False
 
         for i_col_def, line in enumerate(lines):
             if re.match(r'Byte-by-byte Description', line, re.IGNORECASE):
+                found_line = True
+            elif found_line: # First line after list of file descriptions
+                i_col_def -= 1 # Set i_col_def to last description line
                 break
 
         re_col_def = re.compile(r"""\s*
@@ -149,14 +136,17 @@ class CdsHeader(core.BaseHeader):
                     if issubclass(col.type, core.FloatType):
                         fillval = 'nan'
                     else:
-                        fillval = '-999'
-                    if match.group('nullval') == '':
-                        col.null = ''
-                    elif match.group('nullval') == '-':
+                        fillval = '0'
+
+                    if match.group('nullval') == '-':
                         col.null = '---'
+                        # CDS tables can use -, --, ---, or ---- to mark missing values
+                        # see https://github.com/astropy/astropy/issues/1335
+                        for i in [1, 2, 3, 4]:
+                            self.data.fill_values.append(('-'*i, fillval, col.name))
                     else:
                         col.null = match.group('nullval')
-                    self.data.fill_values.append((col.null, fillval, col.name))
+                        self.data.fill_values.append((col.null, fillval, col.name))
 
                 cols.append(col)
             else:  # could be a continuation of the previous col's description
@@ -244,6 +234,20 @@ class Cds(core.BaseReader):
       >>> table = ascii.read("t/vizier/table1.dat", readme="t/vizier/ReadMe")
       >>> table = ascii.read("t/cds/multi/lhs2065.dat", readme="t/cds/multi/ReadMe")
       >>> table = ascii.read("t/cds/glob/lmxbrefs.dat", readme="t/cds/glob/ReadMe")
+      
+    The table name and the CDS ReadMe file can be entered as URLs.  This can be used 
+    to directly load tables from the Internet.  For example, Vizier tables from the 
+    CDS::
+
+      >>> table = ascii.read("ftp://cdsarc.u-strasbg.fr/pub/cats/VII/253/snrs.dat", 
+      ...             readme="ftp://cdsarc.u-strasbg.fr/pub/cats/VII/253/ReadMe")
+
+    If the header (ReadMe) and data are stored in a single file and there
+    is content between the header and the data (for instance Notes), then the
+    parsing process may fail.  In this case you can instruct the reader to
+    guess the actual start of the data by supplying ``data_start='guess'`` in the
+    call to the ``ascii.read()`` function.  You should verify that the output
+    data table matches expectation based on the input CDS file.
 
     **Using a reader object**
 
@@ -291,3 +295,31 @@ class Cds(core.BaseReader):
     def write(self, table=None):
         """Not available for the Cds class (raises NotImplementedError)"""
         raise NotImplementedError
+
+    def read(self, table):
+        # If the read kwarg `data_start` is 'guess' then the table may have extraneous
+        # lines between the end of the header and the beginning of data.
+        if self.data.start_line == 'guess':
+            # Replicate the first part of BaseReader.read up to the point where
+            # the table lines are initially read in.
+            with ignored(TypeError):
+                # For strings only
+                if os.linesep not in table + '':
+                    self.data.table_name = os.path.basename(table)
+
+            self.data.header = self.header
+            self.header.data = self.data
+
+            # Get a list of the lines (rows) in the table
+            lines = self.inputter.get_lines(table)
+
+            # Now try increasing data.start_line by one until the table reads successfully.
+            # For efficiency use the in-memory list of lines instead of `table`, which
+            # could be a file.
+            for data_start in range(len(lines)):
+                self.data.start_line = data_start
+                with ignored(Exception):
+                    table = super(Cds, self).read(lines)
+                    return table
+        else:
+            return super(Cds, self).read(table)

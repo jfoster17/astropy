@@ -18,9 +18,9 @@ class FlagCollection(OrderedDict):
     data, so the `FlagCollection` class adds shape checking to an
     ordered dictionary class.
 
-    The `FlagCollection` should be initialized like an `OrderedDict`,
-    but with the addition of a ``shape=`` keyword argument used to
-    pass the NDData shape.
+    The `FlagCollection` should be initialized like an
+    `~collections.OrderedDict`, but with the addition of a ``shape=``
+    keyword argument used to pass the NDData shape.
     """
 
     def __init__(self, *args, **kwargs):
@@ -40,6 +40,6 @@ class FlagCollection(OrderedDict):
             if value.shape == self.shape:
                 OrderedDict.__setitem__(self, item, value, **kwargs)
             else:
-                raise ValueError("flags array shape {0:s} does not match data shape {1:s}".format(value.shape, self.shape))
+                raise ValueError("flags array shape {0} does not match data shape {1}".format(value.shape, self.shape))
         else:
             raise TypeError("flags should be given as a Numpy array")

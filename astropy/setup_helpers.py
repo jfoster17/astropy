@@ -28,6 +28,8 @@ from distutils.core import Command
 from distutils.command.sdist import sdist as DistutilsSdist
 from setuptools.command.build_ext import build_ext as SetuptoolsBuildExt
 from setuptools.command.build_py import build_py as SetuptoolsBuildPy
+from setuptools.command.install import install as SetuptoolsInstall
+from setuptools.command.install_lib import install_lib as SetuptoolsInstallLib
 
 from setuptools.command.register import register as SetuptoolsRegister
 from setuptools import find_packages
@@ -37,6 +39,8 @@ from .utils import silence
 from .utils.compat.misc import invalidate_caches
 from .utils.misc import walk_skip_hidden
 from .utils.exceptions import AstropyDeprecationWarning
+
+from .extern import six
 
 
 try:
@@ -362,19 +366,25 @@ def register_commands(package, version, release):
     _registered_commands = {
         'test': generate_test_command(package),
 
-         # Use distutils' sdist because it respects package_data.
-         # setuptools/distributes sdist requires duplication of information in
-         # MANIFEST.in
-         'sdist': DistutilsSdist,
+        # Use distutils' sdist because it respects package_data.
+        # setuptools/distributes sdist requires duplication of information in
+        # MANIFEST.in
+        'sdist': DistutilsSdist,
 
-         # The exact form of the build_ext command depends on whether or not
-         # we're building a release version
-         'build_ext': generate_build_ext_command(package, release),
+        # The exact form of the build_ext command depends on whether or not
+        # we're building a release version
+        'build_ext': generate_build_ext_command(package, release),
 
-         # We have a custom build_py to generate the default configuration file
-         'build_py': AstropyBuildPy,
+        # We have a custom build_py to generate the default configuration file
+        'build_py': AstropyBuildPy,
 
-         'register': AstropyRegister
+        # Since install can (in some circumstances) be run without
+        # first building, we also need to override install and
+        # install_lib.  See #2223
+        'install': AstropyInstall,
+        'install_lib': AstropyInstallLib,
+
+        'register': AstropyRegister
     }
 
     try:
@@ -520,19 +530,15 @@ def generate_build_ext_command(packagename, release):
 
             invalidate_caches()
 
+        # REMOVE: in astropy 0.5
         if not self.distribution.is_pure() and os.path.isdir(self.build_lib):
             # Finally, generate the default astropy.cfg; this can only be done
             # after extension modules are built as some extension modules
             # include config items.  We only do this if it's not pure python,
             # though, because if it is, we already did it in build_py
-            default_cfg = generate_default_config(
-                    os.path.abspath(self.build_lib),
-                    self.distribution.packages[0])
-            if default_cfg:
-                default_cfg = os.path.relpath(default_cfg)
-                self.copy_file(default_cfg,
-                               os.path.join(self.build_lib, default_cfg),
-                               preserve_mode=False)
+            generate_default_config(
+                os.path.abspath(self.build_lib),
+                self.distribution.packages[0], self)
 
     attrs['run'] = run
     attrs['finalize_options'] = finalize_options
@@ -540,6 +546,29 @@ def generate_build_ext_command(packagename, release):
     attrs['uses_cython'] = uses_cython
 
     return type('build_ext', (basecls, object), attrs)
+
+
+def _get_platlib_dir(cmd):
+    plat_specifier = '.{0}-{1}'.format(cmd.plat_name, sys.version[0:3])
+    return os.path.join(cmd.build_base, 'lib' + plat_specifier)
+
+
+class AstropyInstall(SetuptoolsInstall):
+
+    def finalize_options(self):
+        build_cmd = self.get_finalized_command('build')
+        platlib_dir = _get_platlib_dir(build_cmd)
+        self.build_lib = platlib_dir
+        SetuptoolsInstall.finalize_options(self)
+
+
+class AstropyInstallLib(SetuptoolsInstallLib):
+
+    def finalize_options(self):
+        build_cmd = self.get_finalized_command('build')
+        platlib_dir = _get_platlib_dir(build_cmd)
+        self.build_dir = platlib_dir
+        SetuptoolsInstallLib.finalize_options(self)
 
 
 class AstropyBuildPy(SetuptoolsBuildPy):
@@ -550,22 +579,12 @@ class AstropyBuildPy(SetuptoolsBuildPy):
         # for projects with only pure-Python source (this is desirable
         # specifically for support of multiple Python version).
         build_cmd = self.get_finalized_command('build')
-        plat_specifier = '.{0}-{1}'.format(build_cmd.plat_name,
-                                           sys.version[0:3])
-        # Do this unconditionally
-        build_purelib = os.path.join(build_cmd.build_base,
-                                     'lib' + plat_specifier)
-        build_cmd.build_purelib = build_purelib
-        build_cmd.build_lib = build_purelib
+        platlib_dir = _get_platlib_dir(build_cmd)
 
-        # Ugly hack: We also need to 'fix' the build_lib option on the
-        # install command--it would be better just to override that command
-        # entirely, but we can get around that extra effort by doing it here
-        install_cmd = self.get_finalized_command('install')
-        install_cmd.build_lib = build_purelib
-        install_lib_cmd = self.get_finalized_command('install_lib')
-        install_lib_cmd.build_dir = build_purelib
-        self.build_lib = build_purelib
+        build_cmd.build_purelib = platlib_dir
+        build_cmd.build_lib = platlib_dir
+        self.build_lib = platlib_dir
+
         SetuptoolsBuildPy.finalize_options(self)
 
     def run_2to3(self, files, doctests=False):
@@ -585,27 +604,45 @@ class AstropyBuildPy(SetuptoolsBuildPy):
         # first run the normal build_py
         SetuptoolsBuildPy.run(self)
 
+        pkgnm = self.distribution.packages[0]
+
+        # REMOVE: in astropy 0.5
         if self.distribution.is_pure():
             # Generate the default astropy.cfg - we only do this here if it's
             # pure python.  Otherwise, it'll happen at the end of build_exp
-            default_cfg = generate_default_config(
-                    os.path.abspath(self.build_lib),
-                    self.distribution.packages[0])
-            if default_cfg:
-                default_cfg = os.path.relpath(default_cfg)
-                self.copy_file(default_cfg,
-                               os.path.join(self.build_lib, default_cfg),
-                               preserve_mode=False)
+            generate_default_config(
+                os.path.abspath(self.build_lib),
+                pkgnm, self)
+
+        # Also copy over *only* the pytest part of setup.cfg.  This is necessary
+        # because the astropy.test() function needs this information to know how
+        # it should be configured.
+        p = six.moves.configparser.SafeConfigParser()
+        p.add_section('pytest')
+
+        pkgnmsection = r'"' + pkgnm + r'[\/]'
+        for k, (fnsrc, v) in six.iteritems(self.distribution.command_options['pytest']):
+            # also need to adjust any part of the pytest section that contains
+            # reference to the package directory (e.g., "astropy" for the core
+            # package), because this file is actually written *into* that
+            # directory.
+            if pkgnmsection in v:
+                v = v.replace(pkgnmsection, '"')
+            p.set('pytest', k, v)
+
+        with open(os.path.join(self.build_lib, pkgnm, 'pytest.ini'), 'w') as f:
+            p.write(f)
 
 
-def generate_default_config(build_lib, package):
+# REMOVE: in astropy 0.5
+def generate_default_config(build_lib, package, command):
     config_path = os.path.relpath(package)
     filename = os.path.join(config_path, package + '.cfg')
 
     if os.path.exists(filename):
-        log.info('regenerating default {0}.cfg file'.format(package))
-    else:
-        log.info('generating default {0}.cfg file'.format(package))
+        return
+
+    log.info('generating default {0}.cfg file in {1}'.format(package, filename))
 
     if PY3:
         builtins = 'builtins'
@@ -636,7 +673,10 @@ def generate_default_config(build_lib, package):
     stdout, stderr = proc.communicate()
 
     if proc.returncode == 0 and os.path.exists(filename):
-        return filename
+        default_cfg = os.path.relpath(filename)
+        command.copy_file(default_cfg,
+                          os.path.join(command.build_lib, default_cfg),
+                          preserve_mode=False)
     else:
         msg = ('Generation of default configuration item failed! Stdout '
                'and stderr are shown below.\n'
@@ -1054,6 +1094,9 @@ def get_package_info(srcdir):
     package_dir = {}
     skip_2to3 = []
 
+    # Add the package's .cfg file
+    package_data[''] = [srcdir + ".cfg"]
+
     # Use the find_packages tool to locate all packages and modules
     packages = filter_packages(find_packages())
 
@@ -1263,11 +1306,10 @@ def get_numpy_include_path():
     # install, since Numpy may still think it's in "setup mode", when
     # in fact we're ready to use it to build astropy now.
 
-    if sys.version_info[0] >= 3:
+    if PY3:
         import builtins
         if hasattr(builtins, '__NUMPY_SETUP__'):
             del builtins.__NUMPY_SETUP__
-        import imp
         import numpy
         imp.reload(numpy)
     else:

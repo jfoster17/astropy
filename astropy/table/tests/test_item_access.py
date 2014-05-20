@@ -1,4 +1,7 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
+
+# TEST_UNICODE_LITERALS
+
 """ Verify item access API in:
 https://github.com/astropy/astropy/wiki/Table-item-access-definition
 """
@@ -7,31 +10,7 @@ import numpy as np
 
 from ...tests.helper import pytest
 from ... import table
-
-
-class MaskedTable(table.Table):
-    def __init__(self, *args, **kwargs):
-        kwargs['masked'] = True
-        table.Table.__init__(self, *args, **kwargs)
-
-
-# Fixture to run all the Column tests for both an unmasked (ndarray)
-# and masked (MaskedArray) column.
-@pytest.fixture(params=[False, True])
-def table_data(request):
-    class TableData:
-        def __init__(self, request):
-            self.Table = MaskedTable if request.param else table.Table
-            self.Column = table.MaskedColumn if request.param else table.Column
-            self.COLS = [
-                self.Column(name='a', data=[1, 2, 3], description='da',
-                            format='fa', meta={'ma': 1}, unit='ua'),
-                self.Column(name='b', data=[4, 5, 6], description='db',
-                            format='fb', meta={'mb': 1}, unit='ub'),
-                self.Column(name='c', data=[7, 8, 9], description='dc',
-                            format='fc', meta={'mc': 1}, unit='ub')]
-            self.DATA = self.Table(self.COLS)
-    return TableData(request)
+from .conftest import MaskedTable
 
 
 @pytest.mark.usefixtures('table_data')
@@ -216,6 +195,18 @@ class TestTableItems(BaseTestItems):
             assert t2.masked == self.t.masked
             assert t2._column_class == self.t._column_class
 
+    def test_select_columns_fail(self, table_data):
+        """Selecting a column that doesn't exist fails"""
+        self.t = table_data.Table(table_data.COLS)
+
+        with pytest.raises(ValueError) as err:
+            self.t[['xxxx']]
+        assert 'Slice name(s) xxxx not valid column name(s)' in str(err)
+
+        with pytest.raises(ValueError) as err:
+            self.t[['xxxx', 'yyyy']]
+        assert 'Slice name(s) xxxx, yyyy not valid column name(s)' in str(err)
+
     def test_np_where(self, table_data):
         """Select rows using output of np.where"""
         t = table_data.Table(table_data.COLS)
@@ -231,6 +222,15 @@ class TestTableItems(BaseTestItems):
         t2 = t[rows]
         assert len(t2) == 0
         assert isinstance(t2, table_data.Table)
+
+    def test_np_integers(self, table_data):
+        """
+        Select rows using numpy integers.  This is a regression test for a
+        py 3.3 failure mode
+        """
+        t = table_data.Table(table_data.COLS)
+        idxs = np.random.randint(len(t), size=2)
+        item = t[idxs[1]]
 
     def test_select_bad_column(self, table_data):
         """Select column name that does not exist"""

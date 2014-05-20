@@ -1,6 +1,6 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """
-Here are all the test parameters and values for the ParametricModels
+Here are all the test parameters and values for the each `FittableModel`
 defined. There is a dictionary for 1D and a dictionary for 2D models.
 
 Explanation of keywords of the dictionaries:
@@ -47,6 +47,9 @@ Explanation of keywords of the dictionaries:
     If given the test of the derivative will use these parameters as initial
     values for the fit (optional)
 """
+
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
 
 from ..functional_models import (
     Gaussian1D, Sine1D, Box1D, Linear1D, Lorentz1D,
@@ -240,10 +243,10 @@ models_2D = {
     },
 
     AiryDisk2D: {
-        'parameters': [1, 0, 0, 1],
+        'parameters': [7, 0, 0, 10],
         'x_values': [0, 1, -1, -0.5, -0.5],
         'y_values': [0, -1, 0.5, 0.5, -0.5],
-        'z_values': [1, 0.0033517, 6.2087723e-7, 0.0093876119, 0.0093876119],
+        'z_values': [7., 6.50158267, 6.68490643, 6.87251093, 6.87251093],
         'x_lim': [-10, 10],
         'y_lim': [-10, 10],
         'requires_scipy': True

@@ -6,9 +6,8 @@ from ..extern.six.moves import zip as izip
 from ..extern.six.moves import range as xrange
 
 import collections
-import sys
-import platform
 import warnings
+import re
 
 from copy import deepcopy
 from distutils import version
@@ -24,7 +23,7 @@ from ..utils.console import color_print
 from ..utils.exceptions import AstropyDeprecationWarning
 from ..utils.metadata import MetaData
 from . import groups
-from .pprint import (_pformat_table, _more_tabcol)
+from .pprint import TableFormatter
 from .column import BaseColumn, Column, MaskedColumn, _auto_names
 from .np_utils import fix_column_name
 
@@ -36,7 +35,10 @@ _NUMPY_VERSION = version.LooseVersion(np.__version__)
 _BROKEN_UNICODE_TABLE_SORT = _NUMPY_VERSION < version.LooseVersion('1.6.2')
 
 
-__doctest_skip__ = ['Table.read', 'Table.write']
+__doctest_skip__ = ['Table.read', 'Table.write',
+                    'Table.convert_bytestring_to_unicode',
+                    'Table.convert_unicode_to_bytestring',
+                    ]
 
 
 class TableColumns(OrderedDict):
@@ -76,16 +78,16 @@ class TableColumns(OrderedDict):
         elif isinstance(item, int):
             return self.values()[item]
         elif isinstance(item, tuple):
-            return TableColumns([self[x] for x in item])
+            return self.__class__([self[x] for x in item])
         elif isinstance(item, slice):
-            return TableColumns([self[x] for x in list(self)[item]])
+            return self.__class__([self[x] for x in list(self)[item]])
         else:
-            raise IndexError('Illegal key or index value for TableColumns '
-                             'object')
+            raise IndexError('Illegal key or index value for {} object'
+                             .format(self.__class__.__name__))
 
     def __repr__(self):
         names = ("'{0}'".format(x) for x in six.iterkeys(self))
-        return "<TableColumns names=({0})>".format(",".join(names))
+        return "<{1} names=({0})>".format(",".join(names), self.__class__.__name__)
 
     def _rename_column(self, name, new_name):
         if new_name in self:
@@ -140,8 +142,8 @@ class Row(object):
                 self._data = ma.core.mvoid(self._data,
                                            mask=self._table._mask[index])
         except ValueError as err:
-            # Another bug (or maybe same?) that is fixed in 1.8 prevents accessing
-            # a row in masked array if it has object-type members.
+            # Another bug (or maybe same?) that is fixed in 1.8 prevents
+            # accessing a row in masked array if it has object-type members.
             # >>> x = np.ma.empty(1, dtype=[('a', 'O')])
             # >>> x['a'] = 1
             # >>> x['a'].mask = True
@@ -228,8 +230,8 @@ class Row(object):
         return self.dtype
 
     def __repr__(self):
-        return "<Row {0} of table\n values={1!r}\n dtype={2}>".format(
-            self.index, self.data, self.dtype)
+        return "<{3} {0} of table\n values={1!r}\n dtype={2}>".format(
+            self.index, self.data, self.dtype, self.__class__.__name__)
 
 
 collections.Sequence.register(Row)
@@ -244,10 +246,10 @@ class Table(object):
     the structure of the table by adding or removing columns, or adding new
     rows of data.  In addition table and column metadata are fully supported.
 
-    `Table` differs from `NDData` by the assumption that the input data
-    consists of columns of homogeneous data, where each column has a unique
-    identifier and may contain additional metadata such as the data
-    unit, format, and description.
+    `Table` differs from `~astropy.nddata.NDData` by the assumption that the
+    input data consists of columns of homogeneous data, where each column
+    has a unique identifier and may contain additional metadata such as the
+    data unit, format, and description.
 
     Parameters
     ----------
@@ -263,13 +265,22 @@ class Table(object):
         Metadata associated with the table.
     copy : bool, optional
         Copy the input data (default=True).
-
+    rows : numpy ndarray, list of lists, optional
+        Row-oriented data for table instead of ``data`` argument
     """
 
     meta = MetaData()
 
+    # Define class attributes for core container objects to allow for subclass
+    # customization.
+    Row = Row
+    Column = Column
+    MaskedColumn = MaskedColumn
+    TableColumns = TableColumns
+    TableFormatter = TableFormatter
+
     def __init__(self, data=None, masked=None, names=None, dtype=None,
-                 meta=None, copy=True, dtypes=None):
+                 meta=None, copy=True, dtypes=None, rows=None):
 
         if dtypes is not None:
             dtype = dtypes
@@ -279,24 +290,41 @@ class Table(object):
         # Set up a placeholder empty table
         self._data = None
         self._set_masked(masked)
-        self.columns = TableColumns()
+        self.columns = self.TableColumns()
         self.meta = meta
+        self.formatter = self.TableFormatter()
 
         # Must copy if dtype are changing
         if not copy and dtype is not None:
             raise ValueError('Cannot specify dtype when copy=False')
+
+        # Row-oriented input, e.g. list of lists or list of tuples, list of
+        # dict, Row instance.  Set data to something that the subsequent code
+        # will parse correctly.
+        is_list_of_dict = False
+        if rows is not None:
+            if data is not None:
+                raise ValueError('Cannot supply both `data` and `rows` values')
+            if all(isinstance(row, dict) for row in rows):
+                is_list_of_dict = True  # Avoid doing the all(...) test twice.
+                data = rows
+            elif isinstance(rows, self.Row):
+                data = rows
+            else:
+                rec_data = np.rec.fromrecords(rows)
+                data = [rec_data[name] for name in rec_data.dtype.names]
 
         # Infer the type of the input data and set up the initialization
         # function, number of columns, and potentially the default col names
 
         default_names = None
 
-        if isinstance(data, Row):
+        if isinstance(data, self.Row):
             data = data._table[data._index:data._index + 1]
 
         if isinstance(data, (list, tuple)):
             init_func = self._init_from_list
-            if data and all(isinstance(row, dict) for row in data):
+            if data and (is_list_of_dict or all(isinstance(row, dict) for row in data)):
                 n_cols = len(data[0])
             else:
                 n_cols = len(data)
@@ -377,9 +405,9 @@ class Table(object):
     def filled(self, fill_value=None):
         """Return a copy of self, with masked values filled.
 
-        If input ``fill_value`` supplied then that value is used for all masked entries
-        in the table.  Otherwise the individual ``fill_value`` defined for each
-        table column is used.
+        If input ``fill_value`` supplied then that value is used for all
+        masked entries in the table.  Otherwise the individual
+        ``fill_value`` defined for each table column is used.
 
         Returns
         -------
@@ -413,26 +441,32 @@ class Table(object):
 
     def _rebuild_table_column_views(self):
         """
-        Some table manipulations can corrupt the Column views of self._data.  This
-        function will cleanly rebuild the columns and self.columns.  This is a slightly
-        subtle operation, see comments.
+        Some table manipulations can corrupt the Column views of self._data.
+        This function will cleanly rebuild the columns and self.columns.
+        This is a slightly subtle operation, see comments.
         """
         cols = []
         for col in six.itervalues(self.columns):
-            # First make a new column based on the name and the original column.  This
-            # step is needed because the table manipulation may have changed the table
-            # masking so that the original data columns no longer correspond to
-            # self.ColumnClass.  This uses data refs, not copies.
+            # First make a new column based on the name and the original
+            # column.  This step is needed because the table manipulation
+            # may have changed the table masking so that the original data
+            # columns no longer correspond to self.ColumnClass.  This uses
+            # data refs, not copies.
             newcol = self.ColumnClass(name=col.name, data=col)
 
-            # Now use the copy() method to copy the column and its metadata, but at
-            # the same time set the column data to a view of self._data[col.name].
-            # Somewhat confusingly in this case copy() refers to copying the
-            # column attributes, but the data are used by reference.
+            # Now use the copy() method to copy the column and its metadata,
+            # but at the same time set the column data to a view of
+            # self._data[col.name].  Somewhat confusingly in this case
+            # copy() refers to copying the column attributes, but the data
+            # are used by reference.
             newcol = newcol.copy(data=self._data[col.name])
+
+            # Make column aware of the parent table
+            newcol.parent_table = self
+
             cols.append(newcol)
 
-        self.columns = TableColumns(cols)
+        self.columns = self.TableColumns(cols)
 
     def _check_names_dtype(self, names, dtype, n_cols):
         """Make sure that names and dtype are boths iterable and have
@@ -454,7 +488,7 @@ class Table(object):
             else:
                 self._set_masked(False)
         elif not self.masked:
-            if any(isinstance(col, (MaskedColumn, ma.MaskedArray)) for col in cols):
+            if any(np.any(col.mask) for col in cols if isinstance(col, (MaskedColumn, ma.MaskedArray))):
                 self._set_masked(True)
 
     def _init_from_list(self, data, names, dtype, n_cols, copy):
@@ -518,7 +552,7 @@ class Table(object):
         else:
             dtype = [(name, col.dtype) for name, col in zip(names, cols)]
             self._data = data.view(dtype).ravel()
-            columns = TableColumns()
+            columns = self.TableColumns()
 
             for name in names:
                 columns[name] = self.ColumnClass(name=name, data=self._data[name])
@@ -594,7 +628,7 @@ class Table(object):
         """Update the existing ``table`` so that it represents the given
         ``data`` (a structured ndarray) with ``cols`` and ``names``."""
 
-        columns = TableColumns()
+        columns = table.TableColumns()
         table._data = data
 
         for name, col in zip(names, cols):
@@ -606,12 +640,20 @@ class Table(object):
 
     def __repr__(self):
         names = ("'{0}'".format(x) for x in self.colnames)
-        s = "<{3} rows={0} names=({1})>\n{2}".format(
-            self.__len__(), ','.join(names), repr(self._data), self.__class__.__name__)
+        if any(col.unit for col in self.columns.values()):
+            units = ("{0}".format(
+                    col.unit if col.unit is None else '\''+str(col.unit)+'\'')
+                    for col in self.columns.values())
+            s = "<{3} rows={0} names=({1}) units=({4})>\n{2}".format(
+                self.__len__(), ','.join(names), repr(self._data), self.__class__.__name__
+                ,','.join(units))
+        else:
+            s = "<{3} rows={0} names=({1})>\n{2}".format(
+                self.__len__(), ','.join(names), repr(self._data), self.__class__.__name__)
         return s
 
     def __unicode__(self):
-        lines, n_header = _pformat_table(self)
+        lines, n_header = self.formatter._pformat_table(self)
         return '\n'.join(lines)
     if six.PY3:
         __str__ = __unicode__
@@ -622,35 +664,39 @@ class Table(object):
         __str__ = __bytes__
 
     def pprint(self, max_lines=None, max_width=None, show_name=True,
-               show_unit=False):
+               show_unit=None):
         """Print a formatted string representation of the table.
 
-        If no value of `max_lines` is supplied then the height of the screen
-        terminal is used to set `max_lines`.  If the terminal height cannot
-        be determined then the default is taken from the configuration item
-        `astropy.table.pprint.MAX_LINES`.  If a negative value of `max_lines`
-        is supplied then there is no line limit applied.
+        If no value of ``max_lines`` is supplied then the height of the
+        screen terminal is used to set ``max_lines``.  If the terminal
+        height cannot be determined then the default is taken from the
+        configuration item ``astropy.conf.max_lines``.  If a negative
+        value of ``max_lines`` is supplied then there is no line limit
+        applied.
 
         The same applies for max_width except the configuration item is
-        `astropy.table.pprint.MAX_WIDTH`.
+        ``astropy.conf.max_width``.
 
         Parameters
         ----------
         max_lines : int
             Maximum number of lines in table output
 
-        max_width : int or None
+        max_width : int or `None`
             Maximum character width of output
 
         show_name : bool
             Include a header row for column names (default=True)
 
         show_unit : bool
-            Include a header row for unit (default=False)
+            Include a header row for unit.  Default is to show a row
+            for units only if one or more columns has a defined value
+            for the unit.
+
         """
 
-        lines, n_header = _pformat_table(self, max_lines, max_width, show_name,
-                                         show_unit)
+        lines, n_header = self.formatter._pformat_table(self, max_lines, max_width, show_name,
+                                                        show_unit)
         for i, line in enumerate(lines):
             if i < n_header:
                 color_print(line, 'red')
@@ -676,28 +722,29 @@ class Table(object):
         max_lines : int
             Maximum number of rows to export to the table (set low by default
             to avoid memory issues, since the browser view requires duplicating
-            the table in memory).  A negative value of `max_lines` indicates
+            the table in memory).  A negative value of ``max_lines`` indicates
             no row limit
         jsviewer : bool
-            If True, prepends some javascript headers so that the table is
+            If `True`, prepends some javascript headers so that the table is
             rendered as a https://datatables.net data table.  This allows
-            in-browser searching & sorting.  See `JSViewer`
+            in-browser searching & sorting.  See `JSViewer
+            <http://www.jsviewer.com/>`_
         jskwargs : dict
-            Passed to the `JSViewer` init
-        tableid : str or None
+            Passed to the `JSViewer`_ init.
+        tableid : str or `None`
             An html ID tag for the table.  Default is "table{id}", where id is
-            the unique integer id of the table object, id(self)
+            the unique integer id of the table object, id(self).
         browser : str
-            Any legal browser name, e.g. 'firefox','chrome','safari'
-            (for mac, you may need to use
-            'open -a "/Applications/Google Chrome.app" %s'
-            for Chrome).
-            If 'default', will use the system default browser.
+            Any legal browser name, e.g. ``'firefox'``, ``'chrome'``,
+            ``'safari'`` (for mac, you may need to use ``'open -a
+            "/Applications/Google Chrome.app" %s'`` for Chrome).  If
+            ``'default'``, will use the system default browser.
 
         Returns
         -------
-        A :py:`tempfile.NamedTemporaryFile` object pointing to the html file on
-        disk.
+        file :
+            A `~tempfile.NamedTemporaryFile` object pointing to the
+            html file on disk.
         """
         import webbrowser
         import tempfile
@@ -707,8 +754,8 @@ class Table(object):
 
         if tableid is None:
             tableid = 'table{id}'.format(id=id(self))
-        linelist = self.pformat(html=True, max_width=np.inf, max_lines=max_lines,
-                                tableid=tableid)
+        linelist = self.pformat(html=True, max_width=np.inf,
+                                max_lines=max_lines, tableid=tableid)
 
         if jsviewer:
             jsv = JSViewer(**jskwargs)
@@ -726,44 +773,47 @@ class Table(object):
         tmp.flush()
 
         if browser == 'default':
-            webbrowser.open("file://"+tmp.name)
+            webbrowser.open("file://" + tmp.name)
         else:
-            webbrowser.get(browser).open("file://"+tmp.name)
+            webbrowser.get(browser).open("file://" + tmp.name)
 
         return tmp
 
     def pformat(self, max_lines=None, max_width=None, show_name=True,
-                show_unit=False, html=False, tableid=None):
+                show_unit=None, html=False, tableid=None):
         """Return a list of lines for the formatted string representation of
         the table.
 
-        If no value of `max_lines` is supplied then the height of the screen
-        terminal is used to set `max_lines`.  If the terminal height cannot
-        be determined then the default is taken from the configuration item
-        `astropy.table.pprint.MAX_LINES`.  If a negative value of `max_lines`
-        is supplied then there is no line limit applied.
+        If no value of ``max_lines`` is supplied then the height of the
+        screen terminal is used to set ``max_lines``.  If the terminal
+        height cannot be determined then the default is taken from the
+        configuration item ``astropy.conf.max_lines``.  If a negative
+        value of ``max_lines`` is supplied then there is no line limit
+        applied.
 
-        The same applies for max_width except the configuration item  is
-        `astropy.table.pprint.MAX_WIDTH`.
+        The same applies for ``max_width`` except the configuration item  is
+        ``astropy.conf.max_width``.
 
         Parameters
         ----------
-        max_lines : int or None
+        max_lines : int or `None`
             Maximum number of rows to output
 
-        max_width : int or None
+        max_width : int or `None`
             Maximum character width of output
 
         show_name : bool
             Include a header row for column names (default=True)
 
         show_unit : bool
-            Include a header row for unit (default=False)
+            Include a header row for unit.  Default is to show a row
+            for units only if one or more columns has a defined value
+            for the unit.
 
         html : bool
             Format the output as an HTML table (default=False)
 
-        tableid : str or None
+        tableid : str or `None`
             An ID tag for the table; only used if html is set.  Default is
             "table{id}", where id is the unique integer id of the table object,
             id(self)
@@ -772,14 +822,15 @@ class Table(object):
         -------
         lines : list
             Formatted table as a list of strings
+
         """
-        lines, n_header = _pformat_table(self, max_lines, max_width,
-                                         show_name, show_unit, html,
-                                         tableid=tableid)
+        lines, n_header = self.formatter._pformat_table(self, max_lines, max_width,
+                                                        show_name, show_unit, html,
+                                                        tableid=tableid)
         return lines
 
     def more(self, max_lines=None, max_width=None, show_name=True,
-             show_unit=False):
+             show_unit=None):
         """Interactively browse table with a paging interface.
 
         Supported keys::
@@ -799,17 +850,19 @@ class Table(object):
         max_lines : int
             Maximum number of lines in table output
 
-        max_width : int or None
+        max_width : int or `None`
             Maximum character width of output
 
         show_name : bool
             Include a header row for column names (default=True)
 
         show_unit : bool
-            Include a header row for unit (default=False)
+            Include a header row for unit.  Default is to show a row
+            for units only if one or more columns has a defined value
+            for the unit.
         """
-        _more_tabcol(self, max_lines, max_width, show_name,
-                     show_unit)
+        self.formatter._more_tabcol(self, max_lines, max_width, show_name,
+                                    show_unit)
 
     def _repr_html_(self):
         # Since the user cannot provide input, need a sensible default
@@ -820,10 +873,14 @@ class Table(object):
     def __getitem__(self, item):
         if isinstance(item, six.string_types):
             return self.columns[item]
-        elif isinstance(item, int):
-            return Row(self, item)
-        elif isinstance(item, (tuple, list)) and all(x in self.colnames
+        elif isinstance(item, (int, np.integer)):
+            return self.Row(self, item)
+        elif isinstance(item, (tuple, list)) and all(isinstance(x, six.string_types)
                                                      for x in item):
+            bad_names = [x for x in item if x not in self.colnames]
+            if bad_names:
+                raise ValueError('Slice name(s) {0} not valid column name(s)'
+                                 .format(', '.join(bad_names)))
             out = self.__class__([self[x] for x in item], meta=deepcopy(self.meta))
             out._groups = groups.TableGroups(out, indices=self.groups._indices,
                                              keys=self.groups._keys)
@@ -845,17 +902,19 @@ class Table(object):
         # If the item is a string then it must be the name of a column.
         # If that column doesn't already exist then create it now.
         if isinstance(item, six.string_types) and item not in self.colnames:
-            NewColumn = MaskedColumn if self.masked else Column
+            NewColumn = self.MaskedColumn if self.masked else self.Column
 
             # Make sure value is an ndarray so we can get the dtype
             if not isinstance(value, np.ndarray):
                 value = np.asarray(value)
 
-            # Make new column and assign the value.  If the table currently has no rows
-            # (len=0) of the value is already a Column then define new column directly
-            # from value.  In the latter case this allows for propagation of Column
-            # metadata.  Otherwise define a new column with the right length and shape and
-            # then set it from value.  This allows for broadcasting, e.g. t['a'] = 1.
+            # Make new column and assign the value.  If the table currently
+            # has no rows (len=0) of the value is already a Column then
+            # define new column directly from value.  In the latter case
+            # this allows for propagation of Column metadata.  Otherwise
+            # define a new column with the right length and shape and then
+            # set it from value.  This allows for broadcasting, e.g. t['a']
+            # = 1.
             if isinstance(value, BaseColumn):
                 new_column = value.copy(copy_data=False)
                 new_column.name = item
@@ -898,7 +957,7 @@ class Table(object):
         else:
             raise StopIteration
 
-    if sys.version_info[0] < 3:  # pragma: py2
+    if six.PY2:
         next = __next__
 
     def field(self, item):
@@ -921,14 +980,14 @@ class Table(object):
         Parameters
         ----------
         masked : bool
-            State of table masking (True or False)
+            State of table masking (`True` or `False`)
         """
         if hasattr(self, '_masked'):
             # The only allowed change is from None to False or True, or False to True
             if self._masked is None and masked in [False, True]:
                 self._masked = masked
             elif self._masked is False and masked is True:
-                log.info("Upgrading Table to masked Table")
+                log.info("Upgrading Table to masked Table. Use Table.filled() to convert to unmasked table.")
                 self._masked = masked
             elif self._masked is masked:
                 raise Exception("Masked attribute is already set to {0}".format(masked))
@@ -941,14 +1000,14 @@ class Table(object):
             else:
                 raise ValueError("masked should be one of True, False, None")
         if self._masked:
-            self._column_class = MaskedColumn
+            self._column_class = self.MaskedColumn
         else:
-            self._column_class = Column
+            self._column_class = self.Column
 
     @property
     def ColumnClass(self):
         if self._column_class is None:
-            return Column
+            return self.Column
         else:
             return self._column_class
 
@@ -1023,7 +1082,7 @@ class Table(object):
         ----------
         col : Column
             Column object to add.
-        index : int or None
+        index : int or `None`
             Insert column before this position or at end (default)
 
         Examples
@@ -1078,7 +1137,7 @@ class Table(object):
         ----------
         cols : list of Columns
             Column objects to add.
-        indexes : list of ints or None
+        indexes : list of ints or `None`
             Insert column before this position or at end (default)
 
         Examples
@@ -1278,7 +1337,7 @@ class Table(object):
 
     def remove_columns(self, names):
         '''
-        Remove several columns from the table
+        Remove several columns from the table.
 
         Parameters
         ----------
@@ -1348,6 +1407,81 @@ class Table(object):
             table = None
 
         self._data = table
+
+    def _convert_string_dtype(self, in_kind, out_kind, python3_only):
+        """
+        Convert string-like columns to/from bytestring and unicode (internal only).
+
+        Parameters
+        ----------
+        in_kind : str
+            Input dtype.kind
+        out_kind : str
+            Output dtype.kind
+        python3_only : bool
+            Only do this operation for Python 3
+        """
+        if python3_only and not six.PY3:
+            return
+
+        # If there are no `in_kind` columns then do nothing
+        cols = self.columns.values()
+        if not any(col.dtype.kind == in_kind for col in cols):
+            return
+
+        newcols = []
+        for col in cols:
+            if col.dtype.kind == in_kind:
+                newdtype = re.sub(in_kind, out_kind, col.dtype.str)
+                newcol = col.__class__(col, dtype=newdtype)
+            else:
+                newcol = col
+            newcols.append(newcol)
+
+        self._init_from_cols(newcols)
+
+    def convert_bytestring_to_unicode(self, python3_only=False):
+        """
+        Convert bytestring columns (dtype.kind='S') to unicode (dtype.kind='U') assuming
+        ASCII encoding.
+
+        Internally this changes string columns to represent each character in the string
+        with a 4-byte UCS-4 equivalent, so it is inefficient for memory but allows Python
+        3 scripts to manipulate string arrays with natural syntax.
+
+        The ``python3_only`` parameter is provided as a convenience so that code can
+        be written in a Python 2 / 3 compatible way::
+
+          >>> t = Table.read('my_data.fits')
+          >>> t.convert_bytestring_to_unicode(python3_only=True)
+
+        Parameters
+        ----------
+        python3_only : bool
+            Only do this operation for Python 3
+        """
+        self._convert_string_dtype('S', 'U', python3_only)
+
+    def convert_unicode_to_bytestring(self, python3_only=False):
+        """
+        Convert ASCII-only unicode columns (dtype.kind='U') to bytestring (dtype.kind='S').
+
+        When exporting a unicode string array to a file in Python 3, it may be desirable
+        to encode unicode columns as bytestrings.  This routine takes advantage of numpy
+        automated conversion which works for strings that are pure ASCII.
+
+        The ``python3_only`` parameter is provided as a convenience so that code can
+        be written in a Python 2 / 3 compatible way::
+
+          >>> t.convert_unicode_to_bytestring(python3_only=True)
+          >>> t.write('my_data.fits')
+
+        Parameters
+        ----------
+        python3_only : bool
+            Only do this operation for Python 3
+        """
+        self._convert_string_dtype('S', 'U', python3_only)
 
     def keep_columns(self, names):
         '''
@@ -1429,7 +1563,7 @@ class Table(object):
         Create a table with three columns 'a', 'b' and 'c'::
 
             >>> t = Table([[1,2],[3,4],[5,6]], names=('a','b','c'))
-            >>> t.pprint()
+            >>> print(t)
              a   b   c
             --- --- ---
               1   3   5
@@ -1438,7 +1572,7 @@ class Table(object):
         Renaming column 'a' to 'aa'::
 
             >>> t.rename_column('a' , 'aa')
-            >>> t.pprint()
+            >>> print(t)
              aa  b   c
             --- --- ---
               1   3   5
@@ -1460,7 +1594,7 @@ class Table(object):
         mapping (e.g. dict)
             Keys corresponding to column names.  Missing values will be
             filled with np.zeros for the column dtype.
-        None
+        `None`
             All values filled with np.zeros for the column dtype.
 
         This method requires that the Table object "owns" the underlying array
@@ -1475,7 +1609,7 @@ class Table(object):
 
         Parameters
         ----------
-        vals : tuple, list, dict or None
+        vals : tuple, list, dict or `None`
             Use the specified values in the new row
 
         Examples
@@ -1483,7 +1617,7 @@ class Table(object):
         Create a table with three columns 'a', 'b' and 'c'::
 
            >>> t = Table([[1,2],[4,5],[7,8]], names=('a','b','c'))
-           >>> t.pprint()
+           >>> print(t)
             a   b   c
            --- --- ---
              1   4   7
@@ -1492,7 +1626,7 @@ class Table(object):
         Adding a new row with entries '3' in 'a', '6' in 'b' and '9' in 'c'::
 
            >>> t.add_row([3,6,9])
-           >>> t.pprint()
+           >>> print(t)
              a   b   c
              --- --- ---
              1   4   7
@@ -1587,9 +1721,9 @@ class Table(object):
 
     def argsort(self, keys=None, kind=None):
         """
-        Return the indices which would sort the table according to one or more key columns.
-        This simply calls the `numpy.argsort` function on the table with the ``order``
-        parameter set to `keys`.
+        Return the indices which would sort the table according to one or
+        more key columns.  This simply calls the `numpy.argsort` function on
+        the table with the ``order`` parameter set to ``keys``.
 
         Parameters
         ----------
@@ -1601,7 +1735,8 @@ class Table(object):
         Returns
         -------
         index_array : ndarray, int
-            Array of indices that sorts the table by the specified key column(s).
+            Array of indices that sorts the table by the specified key
+            column(s).
         """
         if isinstance(keys, six.string_types):
             keys = [keys]
@@ -1635,7 +1770,7 @@ class Table(object):
 
             >>> t = Table([['Max', 'Jo', 'John'], ['Miller','Miller','Jackson'],
             ...         [12,15,18]], names=('firstname','name','tel'))
-            >>> t.pprint()
+            >>> print(t)
             firstname   name  tel
             --------- ------- ---
                   Max  Miller  12
@@ -1645,7 +1780,7 @@ class Table(object):
         Sorting according to standard sorting rules, first 'name' then 'firstname'::
 
             >>> t.sort(['name','firstname'])
-            >>> t.pprint()
+            >>> print(t)
             firstname   name  tel
             --------- ------- ---
                  John Jackson  18
@@ -1678,7 +1813,7 @@ class Table(object):
 
             >>> t = Table([['Max', 'Jo', 'John'], ['Miller','Miller','Jackson'],
             ...         [12,15,18]], names=('firstname','name','tel'))
-            >>> t.pprint()
+            >>> print(t)
             firstname   name  tel
             --------- ------- ---
                   Max  Miller  12
@@ -1688,7 +1823,7 @@ class Table(object):
         Reversing order::
 
             >>> t.reverse()
-            >>> t.pprint()
+            >>> print(t)
             firstname   name  tel
             --------- ------- ---
                  John Jackson  18
@@ -1735,13 +1870,13 @@ class Table(object):
 
     def copy(self, copy_data=True):
         '''
-        Return a copy of the table
+        Return a copy of the table.
 
 
         Parameters
         ----------
         copy_data : bool
-            If True (the default), copy the underlying data array.
+            If `True` (the default), copy the underlying data array.
             Otherwise, use the same data array
         '''
         out = self.__class__(self, copy=copy_data)
@@ -1761,26 +1896,30 @@ class Table(object):
     def __lt__(self, other):
         if six.PY3:
             return super(Table, self).__lt__(other)
-        else:
-            raise TypeError("unorderable types: Table() < {0}".format(str(type(other))))
+        elif six.PY2:
+            raise TypeError("unorderable types: Table() < {0}".
+                            format(str(type(other))))
 
     def __gt__(self, other):
         if six.PY3:
             return super(Table, self).__gt__(other)
-        else:
-            raise TypeError("unorderable types: Table() > {0}".format(str(type(other))))
+        elif six.PY2:
+            raise TypeError("unorderable types: Table() > {0}".
+                            format(str(type(other))))
 
     def __le__(self, other):
         if six.PY3:
             return super(Table, self).__le__(other)
-        else:
-            raise TypeError("unorderable types: Table() <= {0}".format(str(type(other))))
+        elif six.PY2:
+            raise TypeError("unorderable types: Table() <= {0}".
+                            format(str(type(other))))
 
     def __ge__(self, other):
         if six.PY3:
             return super(Table, self).__ge__(other)
         else:
-            raise TypeError("unorderable types: Table() >= {0}".format(str(type(other))))
+            raise TypeError("unorderable types: Table() >= {0}".
+                            format(str(type(other))))
 
     def __eq__(self, other):
 
@@ -1819,9 +1958,10 @@ class Table(object):
         """
         Group this table by the specified ``keys``
 
-        This effectively splits the table into groups which correspond to unique values of
-        the ``keys`` grouping object.  The output is a new `GroupedTable` which contains a
-        copy of this table but sorted by row according to ``keys``.
+        This effectively splits the table into groups which correspond to
+        unique values of the ``keys`` grouping object.  The output is a new
+        `GroupedTable` which contains a copy of this table but sorted by row
+        according to ``keys``.
 
         The ``keys`` input to `group_by` can be specified in different ways:
 
@@ -1831,12 +1971,12 @@ class Table(object):
 
         Parameters
         ----------
-        keys : str, list of str, numpy array, or Table
+        keys : str, list of str, numpy array, or `Table`
             Key grouping object
 
         Returns
         -------
-        out : Table
+        out : `Table`
             New table with groups set
         """
         return groups.table_group_by(self, keys)

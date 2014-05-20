@@ -11,8 +11,8 @@ from arrays or combine existing kernels to match specific applications.
 Every filter kernel is characterized by its response function. For time series
 we speak of an "impulse response function" or for images we call it "point
 spread function". This response function is given for every kernel by a
-`~astropy.modeling.core.ParametricModel`, which is evaluated on a grid with
-:func:`~astropy.convolution.utils.discretize_model` to obtain a kernel
+`~astropy.modeling.FittableModel`, which is evaluated on a grid with
+:func:`~astropy.convolution.discretize_model` to obtain a kernel
 array, which can be used for discrete convolution with the binned data.
 
 
@@ -22,8 +22,8 @@ Examples
 1D Kernels
 ^^^^^^^^^^
 
-One application of filtering is to smooth noisy data. In this case we consider a noisy
-Lorentz curve:
+One application of filtering is to smooth noisy data. In this case we
+consider a noisy Lorentz curve:
 
 >>> import numpy as np
 >>> from astropy.modeling.models import Lorentz1D
@@ -32,12 +32,14 @@ Lorentz curve:
 >>> x = np.linspace(-5, 5, 100)
 >>> data_1D = lorentz(x) + 0.1 * (np.random.rand(100) - 0.5)
 
-Smoothing the noisy data with a `~astropy.convolution.kernels.Gaussian1D` of width 2 pixels:
+Smoothing the noisy data with a `~astropy.convolution.Gaussian1DKernel`
+with a standard deviation of 2 pixels:
 
 >>> gauss_kernel = Gaussian1DKernel(2)
 >>> smoothed_data_gauss = convolve(data_1D, gauss_kernel)
 
-Smoothing the same data with a `~astropy.convolution.kernels.Box1DKernel` of width 5 pixels:
+Smoothing the same data with a `~astropy.convolution.Box1DKernel` of
+width 5 pixels:
 
 >>> box_kernel = Box1DKernel(5)
 >>> smoothed_data_box = convolve(data_1D, box_kernel)
@@ -75,8 +77,8 @@ The following plot illustrates the results:
 
 
 Beside the astropy convolution functions
-`~astropy.convolution.convolve.convolve` and
-`~astropy.convolution.convolve.convolve_fft`, it is also possible to use
+`~astropy.convolution.convolve` and
+`~astropy.convolution.convolve_fft`, it is also possible to use
 the kernels with Numpy or Scipy convolution by passing the ``array`` attribute.
 This will be faster in most cases than the astropy convolution, but will not
 work properly if ``NaN`` values are present in the data.
@@ -102,13 +104,14 @@ middle of the image and add 10% noise:
 >>> data_2D = gauss(x, y) + 0.1 * (np.random.rand(201, 201) - 0.5)
 
 Smoothing the noisy data with a
-:class:`~astropy.convolution.kernels.Gaussian2DKernel` of width 2 pixels:
+:class:`~astropy.convolution.Gaussian2DKernel` with a standard
+deviation of 2 pixels:
 
 >>> gauss_kernel = Gaussian2DKernel(2)
 >>> smoothed_data_gauss = convolve(data_2D, gauss_kernel)
 
 Smoothing the noisy data with a
-:class:`~astropy.convolution.kernels.Tophat2DKernel` of width 5 pixels:
+:class:`~astropy.convolution.Tophat2DKernel` of width 5 pixels:
 
 >>> tophat_kernel = Tophat2DKernel(5)
 >>> smoothed_data_tophat = convolve(data_2D, tophat_kernel)
@@ -188,9 +191,24 @@ The best choice for the filter strongly depends on the application.
 Available Kernels
 -----------------
 
-.. automodsumm:: astropy.convolution.kernels
-    :classes-only:
+.. currentmodule:: astropy.convolution
 
+.. autosummary::
+
+   AiryDisk2DKernel
+   Box1DKernel
+   Box2DKernel
+   CustomKernel
+   Gaussian1DKernel
+   Gaussian2DKernel
+   MexicanHat1DKernel
+   MexicanHat2DKernel
+   Model1DKernel
+   Model2DKernel
+   Ring2DKernel
+   Tophat2DKernel
+   Trapezoid1DKernel
+   TrapezoidDisk2DKernel
 
 Kernel Arithmetics
 ------------------
@@ -257,29 +275,29 @@ Discretization
 
 To obtain the kernel array for discrete convolution, the kernels response
 function is evaluated on a grid with
-:func:`~astropy.convolution.utils.discretize_model`. For the
+:func:`~astropy.convolution.discretize_model`. For the
 discretization step the following modes are available:
 
-Mode ``'center'`` (default) evaluates the response function on the grid by
-taking the value at the center of the bin.
+* Mode ``'center'`` (default) evaluates the response function on the grid by
+  taking the value at the center of the bin.
 
->>> from astropy.convolution import Gaussian1DKernel
->>> gauss_center = Gaussian1DKernel(3, mode='center')
+   >>> from astropy.convolution import Gaussian1DKernel
+   >>> gauss_center = Gaussian1DKernel(3, mode='center')
 
-Mode ``'linear_interp'`` takes the values at the corners of the bin and linearly
-interpolates the value at the center:
+* Mode ``'linear_interp'`` takes the values at the corners of the bin and linearly
+  interpolates the value at the center:
 
->>> gauss_interp = Gaussian1DKernel(3, mode='linear_interp')
+  >>> gauss_interp = Gaussian1DKernel(3, mode='linear_interp')
 
-Mode ``'oversample'`` evaluates the response function by taking the mean on an
-oversampled grid. The oversample factor can be specified with the ``factor``
-argument. If the oversample factor is too large, the evaluation becomes slow.
+* Mode ``'oversample'`` evaluates the response function by taking the mean on an
+  oversampled grid. The oversample factor can be specified with the ``factor``
+  argument. If the oversample factor is too large, the evaluation becomes slow.
 
->>> gauss_oversample = Gaussian1DKernel(3, mode='oversample', factor=10)
+ >>> gauss_oversample = Gaussian1DKernel(3, mode='oversample', factor=10)
 
-Mode ``'integrate'`` integrates the function over the pixel using
-``scipy.integrate.quad`` and ``scipy.integrate.dblquad``. This mode is very
-slow and only recommended when highest accuracy is required.
+* Mode ``'integrate'`` integrates the function over the pixel using
+  ``scipy.integrate.quad`` and ``scipy.integrate.dblquad``. This mode is very
+  slow and only recommended when highest accuracy is required.
 
 .. doctest-requires:: scipy
 
@@ -302,18 +320,18 @@ attribute.
 The normalization can also differ from one, especially for small kernels, due
 to the discretization step. This can be partly controlled by the ``mode``
 argument, when initializing the kernel (See also
-:func:`~astropy.convolution.utils.discretize_model`). Setting the
+:func:`~astropy.convolution.discretize_model`). Setting the
 ``mode`` to ``'oversample'`` allows to conserve the normalization even on the
 subpixel scale.
 
 The kernel arrays can be renormalized explicitly by calling either the
 ``normalize()`` method or by setting the ``normalize_kernel`` argument in the
-:func:`~astropy.convolution.convolve.convolve` and
-:func:`~astropy.convolution.convolve.convolve_fft` functions. The latter
+:func:`~astropy.convolution.convolve` and
+:func:`~astropy.convolution.convolve_fft` functions. The latter
 method leaves the kernel itself unchanged but works with an internal normalized
 version of the kernel.
 
-Note that for :class:`~astropy.convolution.kernels.MexicanHat1DKernel`
-and :class:`~astropy.convolution.kernels.MexicanHat2DKernel` there is
+Note that for :class:`~astropy.convolution.MexicanHat1DKernel`
+and :class:`~astropy.convolution.MexicanHat2DKernel` there is
 :math:`\int_{-\infty}^{\infty} f(x) dx = 0`. To define a proper normalization
 both filters are derived from a normalized Gaussian function.

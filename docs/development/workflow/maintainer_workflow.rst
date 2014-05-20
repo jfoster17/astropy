@@ -22,7 +22,7 @@ Make sure that pull requests do not contain a messy history with merges, etc. If
 Integrating changes manually
 ****************************
 
-First, check out the ``astropy`` repository. The instructions in :ref:`linking-to-upstream` add a remote that has read-only
+First, check out the ``astropy`` repository. The instructions in :ref:`set_upstream_master` add a remote that has read-only
 access to the upstream repo.  Being a maintainer, you've got read-write access.
 
 It's good to have your upstream remote have a scary name, to remind you that
@@ -152,11 +152,11 @@ followed by IPython:
   it's been more closely reviewed prior to release.
 
 * Active milestones associated with a specific release (eg. v0.3.0) should contain at least one issue with the
-  `release` label representing the actual task for releasing that version (this also works around the GitHub annoyance
+  release label representing the actual task for releasing that version (this also works around the GitHub annoyance
   that milestones without any open issues are automatically closed).
 
 * Issues that require fixing in the mainline, but that also are confirmed to apply to supported stable version lines
-  should be marked with one or more `backport-*` labels for each v0.X.Y branch that has the issue.
+  should be marked with one or more ``'backport-*'`` labels for each v0.X.Y branch that has the issue.
 
   * In some cases it may require extra work beyond a simple merge to port bug fixes to older lines of development; if
     such additional work is required it is not a bad idea to open a "Backport #nnn to v0.X.Y" issue in the appropriate

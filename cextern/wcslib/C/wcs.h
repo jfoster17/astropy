@@ -1,7 +1,7 @@
 /*============================================================================
 
-  WCSLIB 4.19 - an implementation of the FITS WCS standard.
-  Copyright (C) 1995-2013, Mark Calabretta
+  WCSLIB 4.23 - an implementation of the FITS WCS standard.
+  Copyright (C) 1995-2014, Mark Calabretta
 
   This file is part of WCSLIB.
 
@@ -22,10 +22,10 @@
 
   Author: Mark Calabretta, Australia Telescope National Facility, CSIRO.
   http://www.atnf.csiro.au/people/Mark.Calabretta
-  $Id: wcs.h,v 4.19 2013/09/29 14:17:51 mcalabre Exp $
+  $Id: wcs.h,v 4.23 2014/05/11 04:09:38 mcalabre Exp $
 *=============================================================================
 *
-* WCSLIB 4.19 - C routines that implement the FITS World Coordinate System
+* WCSLIB 4.23 - C routines that implement the FITS World Coordinate System
 * (WCS) standard.  Refer to
 *
 *   "Representations of world coordinates in FITS",
@@ -312,6 +312,43 @@
 *   if any were specified on input).
 *
 *
+* wcscompare() - Compare two wcsprm structs for equality
+* ------------------------------------------------------
+* wcscompare() compares two wcsprm structs for equality.
+*
+* Given:
+*   cmp       int       A bit field controlling the strictness of the
+*                       comparison.  When 0, all fields must be identical.
+*
+*                       The following constants may be or'ed together to
+*                       relax the comparison:
+*                         WCSCOMPARE_ANCILLARY: Ignore ancillary keywords
+*                           that don't change the WCS transformation, such
+*                           as DATE-OBS or EQUINOX.
+*                         WCSCOMPARE_TILING: Ignore integral differences in
+*                           CRPIXja.  This is the 'tiling' condition, where
+*                           two WCSes cover different regions of the same
+*                           map projection and align on the same map grid.
+*                         WCSCOMPARE_CRPIX: Ignore any differences at all in
+*                           CRPIXja.  The two WCSes cover different regions
+*                           of the same map projection but may not align on
+*                           the same grid map.  Overrides WCSCOMPARE_TILING.
+*
+*   wcs1      const struct wcsprm*
+*                       The first wcsprm struct to compare.
+*
+*   wcs2      const struct wcsprm*
+*                       The second wcsprm struct to compare.
+*
+* Returned:
+*   equal     int*      Non-zero when the given structs are equal.
+*
+* Function return value:
+*             int       Status return value:
+*                         0: Success.
+*                         1: Null pointer passed.
+*
+*
 * wcscopy() macro - Copy routine for the wcsprm struct
 * ----------------------------------------------------
 * wcscopy() does a deep copy of one wcsprm struct to another.  As of
@@ -373,6 +410,37 @@
 *                         1: Null wcsprm pointer passed.
 *
 *
+* wcsbchk() - Enable/disable bounds checking
+* ------------------------------------------
+* wcsbchk() is used to control bounds checking in the projection routines.
+* Note that wcsset() always enables bounds checking.  wcsbchk() will invoke
+* wcsset() on the wcsprm struct beforehand if necessary.
+*
+* Given and returned:
+*   wcs       struct wcsprm*
+*                       Coordinate transformation parameters.
+*
+* Given:
+*   bounds    int       If bounds&1 then enable strict bounds checking for the
+*                       spherical-to-Cartesian (s2x) transformation for the
+*                       AZP, SZP, TAN, SIN, ZPN, and COP projections.
+*
+*                       If bounds&2 then enable strict bounds checking for the
+*                       Cartesian-to-spherical (x2s) transformation for the
+*                       HPX and XPH projections.
+*
+*                       If bounds&4 then enable bounds checking on the native
+*                       coordinates returned by the Cartesian-to-spherical
+*                       (x2s) transformations using prjchk().
+*
+*                       Zero it to disable all checking.
+*
+* Function return value:
+*             int       Status return value:
+*                         0: Success.
+*                         1: Null wcsprm pointer passed.
+*
+*
 * wcsset() - Setup routine for the wcsprm struct
 * ----------------------------------------------
 * wcsset() sets up a wcsprm struct according to information supplied within
@@ -406,6 +474,11 @@
 *
 *                       For returns > 1, a detailed error message is set in
 *                       wcsprm::err if enabled, see wcserr_enable().
+*
+* Notes:
+*   wcsset() always enables strict bounds checking in the projection routines
+*   (via a call to prjini()).  Use wcsbchk() to modify bounds-checking after
+*   wcsset() is invoked.
 *
 *
 * wcsp2s() - Pixel-to-world transformation
@@ -450,7 +523,7 @@
 *   stat      int[ncoord]
 *                       Status return value for each coordinate:
 *                         0: Success.
-*                         1+: A bit mask indicating invalid pixel coordinate
+*                        1+: A bit mask indicating invalid pixel coordinate
 *                            element(s).
 *
 * Function return value:
@@ -516,7 +589,7 @@
 *   stat      int[ncoord]
 *                       Status return value for each coordinate:
 *                         0: Success.
-*                         1+: A bit mask indicating invalid world coordinate
+*                        1+: A bit mask indicating invalid world coordinate
 *                            element(s).
 *
 * Function return value:
@@ -1310,6 +1383,11 @@ extern "C" {
 #define WCSSUB_STOKES    0x1010
 
 
+#define WCSCOMPARE_ANCILLARY 0x0001
+#define WCSCOMPARE_TILING    0x0002
+#define WCSCOMPARE_CRPIX     0x0004
+
+
 extern const char *wcs_errmsg[];
 
 enum wcs_errmsg_enum {
@@ -1333,7 +1411,7 @@ enum wcs_errmsg_enum {
   WCSERR_NO_SOLUTION     = 11,	/* No solution found in the specified
 				   interval. */
   WCSERR_BAD_SUBIMAGE    = 12,	/* Invalid subimage specification. */
-  WCSERR_NON_SEPARABLE   = 13	/* Non-separable subimage coordinate
+  WCSERR_NON_SEPARABLE   = 13 	/* Non-separable subimage coordinate
 				   system. */
 };
 
@@ -1490,11 +1568,16 @@ int wcsini(int alloc, int naxis, struct wcsprm *wcs);
 int wcssub(int alloc, const struct wcsprm *wcssrc, int *nsub, int axes[],
            struct wcsprm *wcsdst);
 
+int wcscompare(int cmp, const struct wcsprm *wcs1, const struct wcsprm *wcs2,
+               int *equal);
+
 int wcsfree(struct wcsprm *wcs);
 
 int wcsprt(const struct wcsprm *wcs);
 
 int wcsperr(const struct wcsprm *wcs, const char *prefix);
+
+int wcsbchk(struct wcsprm *wcs, int bounds);
 
 int wcsset(struct wcsprm *wcs);
 

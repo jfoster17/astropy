@@ -17,7 +17,7 @@ from ..header import _pad_length
 from ..util import (_is_int, _tmp_name, fileobj_closed, ignore_sigint,
                     _get_array_mmap)
 from ..verify import _Verify, _ErrList, VerifyError, VerifyWarning
-
+from ....extern.six import string_types
 from ....utils import indent
 from ....utils.exceptions import AstropyUserWarning
 
@@ -34,7 +34,7 @@ def fitsopen(name, mode='readonly', memmap=None, save_backup=False, **kwargs):
         Open mode, 'readonly' (default), 'update', 'append', 'denywrite', or
         'ostream'.
 
-        If `name` is a file object that is already opened, `mode` must
+        If ``name`` is a file object that is already opened, ``mode`` must
         match the mode the file was opened with, readonly (rb), update (rb+),
         append (ab+), ostream (w), denywrite (rb)).
 
@@ -54,8 +54,8 @@ def fitsopen(name, mode='readonly', memmap=None, save_backup=False, **kwargs):
 
             Interpret signed integer data where ``BZERO`` is the
             central value and ``BSCALE == 1`` as unsigned integer
-            data.  For example, `int16` data with ``BZERO = 32768``
-            and ``BSCALE = 1`` would be treated as `uint16` data.
+            data.  For example, ``int16`` data with ``BZERO = 32768``
+            and ``BSCALE = 1`` would be treated as ``uint16`` data.
 
             Note, for backward compatibility, the kwarg **uint16** may
             be used instead.  The kwarg was renamed when support was
@@ -86,6 +86,9 @@ def fitsopen(name, mode='readonly', memmap=None, save_backup=False, **kwargs):
             If `True`, image data is not scaled using BSCALE/BZERO values
             when read.
 
+        - **ignore_blank** : bool
+           If `True`, the BLANK keyword is ignored if present.
+
         - **scale_back** : bool
 
             If `True`, when saving changes to a file that contained scaled
@@ -103,8 +106,8 @@ def fitsopen(name, mode='readonly', memmap=None, save_backup=False, **kwargs):
     """
 
     if memmap is None:
-        from .. import USE_MEMMAP
-        memmap = USE_MEMMAP()
+        from .. import conf
+        memmap = conf.use_memmap
 
     if 'uint16' in kwargs and 'uint' not in kwargs:
         kwargs['uint'] = kwargs['uint16']
@@ -130,7 +133,7 @@ class HDUList(list, _Verify):
         ----------
         hdus : sequence of HDU objects or single HDU, optional
             The HDU object(s) to comprise the `HDUList`.  Should be
-            instances of `_BaseHDU`.
+            instances of HDU classes like `ImageHDU` or `BinTableHDU`.
 
         file : file object, optional
             The opened physical file associated with the `HDUList`.
@@ -237,9 +240,9 @@ class HDUList(list, _Verify):
     def fromfile(cls, fileobj, mode=None, memmap=False,
                  save_backup=False, **kwargs):
         """
-        Creates an HDUList instance from a file-like object.
+        Creates an `HDUList` instance from a file-like object.
 
-        The actual implementation of :func:`fitsopen`, and generally shouldn't
+        The actual implementation of ``fitsopen()``, and generally shouldn't
         be used directly.  Use :func:`open` instead (and see its
         documentation for details of the parameters accepted by this method).
         """
@@ -250,7 +253,7 @@ class HDUList(list, _Verify):
     @classmethod
     def fromstring(cls, data, **kwargs):
         """
-        Creates an HDUList instance from a string or other in-memory data
+        Creates an `HDUList` instance from a string or other in-memory data
         buffer containing an entire FITS file.  Similar to
         :meth:`HDUList.fromfile`, but does not accept the mode or memmap
         arguments, as they are only relevant to reading from a file on disk.
@@ -347,14 +350,14 @@ class HDUList(list, _Verify):
 
     def insert(self, index, hdu):
         """
-        Insert an HDU into the `HDUList` at the given `index`.
+        Insert an HDU into the `HDUList` at the given ``index``.
 
         Parameters
         ----------
         index : int
             Index before which to insert the new HDU.
 
-        hdu : _BaseHDU instance
+        hdu : HDU object
             The HDU object to insert
         """
 
@@ -416,7 +419,7 @@ class HDUList(list, _Verify):
 
         Parameters
         ----------
-        hdu : instance of _BaseHDU
+        hdu : HDU object
             HDU to add to the `HDUList`.
         """
 
@@ -464,9 +467,9 @@ class HDUList(list, _Verify):
         Parameters
         ----------
         key : int, str or tuple of (string, int)
-           The key identifying the HDU.  If `key` is a tuple, it is of
-           the form (`key`, `ver`) where `ver` is an ``EXTVER`` value
-           that must match the HDU being searched for.
+           The key identifying the HDU.  If ``key`` is a tuple, it is of the
+           form ``(key, ver)`` where ``ver`` is an ``EXTVER`` value that must
+           match the HDU being searched for.
 
         Returns
         -------
@@ -482,7 +485,7 @@ class HDUList(list, _Verify):
             _key = key
             _ver = None
 
-        if not isinstance(_key, str):
+        if not isinstance(_key, string_types):
             raise KeyError(key)
         _key = (_key.strip()).upper()
 
@@ -490,7 +493,7 @@ class HDUList(list, _Verify):
         found = None
         for idx, hdu in enumerate(self):
             name = hdu.name
-            if isinstance(name, str):
+            if isinstance(name, string_types):
                 name = name.strip().upper()
             # 'PRIMARY' should always work as a reference to the first HDU
             if ((name == _key or (_key == 'PRIMARY' and idx == 0)) and
@@ -580,8 +583,8 @@ class HDUList(list, _Verify):
 
     def update_extend(self):
         """
-        Make sure that if the primary header needs the keyword
-        ``EXTEND`` that it has it and it is correct.
+        Make sure that if the primary header needs the keyword ``EXTEND`` that
+        it has it and it is correct.
         """
 
         if not len(self):
@@ -640,7 +643,7 @@ class HDUList(list, _Verify):
         # make note of whether the input file object is already open, in which
         # case we should not close it after writing (that should be the job
         # of the caller)
-        closed = fileobj_closed(fileobj)
+        closed = isinstance(fileobj, string_types) or fileobj_closed(fileobj)
 
         # writeto is only for writing a new file from scratch, so the most
         # sensible mode to require is 'ostream'.  This can accept an open
@@ -692,8 +695,8 @@ class HDUList(list, _Verify):
 
         Parameters
         ----------
-        output : file, bool (optional)
-            A file-like object to write the output to.  If ``False``, does not
+        output : file, bool, optional
+            A file-like object to write the output to.  If `False`, does not
             output to a file and instead returns a list of tuples representing
             the HDU info.  Writes to ``sys.stdout`` by default.
         """
@@ -771,7 +774,7 @@ class HDUList(list, _Verify):
             hdulist = cls()
             # This method is currently only called from HDUList.fromstring and
             # HDUList.fromfile.  If fileobj is None then this must be the
-            # fromstring case; the data type of `data` will be checked in the
+            # fromstring case; the data type of ``data`` will be checked in the
             # _BaseHDU.fromstring call.
 
         hdulist._save_backup = save_backup

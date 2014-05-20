@@ -1,6 +1,11 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from __future__ import division
+
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
+
 import types
+from ..core import Fittable1DModel
+from ..parameters import Parameter
 from .. import models
 from .. import fitting
 import numpy as np
@@ -212,15 +217,11 @@ def test_set_fixed_1():
     gauss = models.Gaussian1D(amplitude=20, mean=2, stddev=1)
     gauss.mean.fixed = True
     assert gauss.fixed == {'amplitude': False, 'mean': True, 'stddev': False}
-    fitparams, _ = gauss._model_to_fit_params()
-    assert np.all(fitparams == [20, 1])
 
 
 def test_set_fixed_2():
     gauss = models.Gaussian1D(amplitude=20, mean=2, stddev=1, fixed={'mean': True})
     assert gauss.mean.fixed is True
-    fitparams, _ = gauss._model_to_fit_params()
-    assert np.all(fitparams == [20, 1])
 
 
 def test_set_tied_1():
@@ -246,8 +247,6 @@ def test_unset_fixed():
     gauss = models.Gaussian1D(amplitude=20, mean=2, stddev=1, fixed={'mean': True})
     gauss.mean.fixed = False
     assert gauss.fixed == {'amplitude': False, 'mean': False, 'stddev': False}
-    fitparams, _  = gauss._model_to_fit_params()
-    assert np.all(fitparams == [20, 2, 1])
 
 
 def test_unset_tied():
@@ -258,8 +257,6 @@ def test_unset_tied():
                               tied={'amplitude': tie_amplitude})
     gauss.amplitude.tied = False
     assert gauss.tied == {'amplitude': False, 'mean': False, 'stddev': False}
-    fitparams, _  = gauss._model_to_fit_params()
-    assert np.all(fitparams == [20, 2, 1])
 
 
 def test_set_bounds_1():
@@ -285,3 +282,48 @@ def test_unset_bounds():
     assert gauss.bounds == {'amplitude': (None, None),
                             'mean': (None, None),
                             'stddev': (None, None)}
+
+
+def test_default_constraints():
+    """Regression test for https://github.com/astropy/astropy/issues/2396
+
+    Ensure that default constraints defined on parameters are carried through
+    to instances of the models those parameters are defined for.
+    """
+
+    class MyModel(Fittable1DModel):
+        a = Parameter(default=1)
+        b = Parameter(default=0, min=0, fixed=True)
+
+        @staticmethod
+        def eval(x, a, b):
+            return x * a + b
+
+    assert MyModel.a.default == 1
+    assert MyModel.b.default == 0
+    assert MyModel.b.min == 0
+    assert MyModel.b.bounds == (0, None)
+    assert MyModel.b.fixed is True
+
+    m = MyModel()
+    assert m.a.value == 1
+    assert m.b.value == 0
+    assert m.b.min == 0
+    assert m.b.bounds == (0, None)
+    assert m.b.fixed is True
+    assert m.bounds == {'a': (None, None), 'b': (0, None)}
+    assert m.fixed == {'a': False, 'b': True}
+
+    # Make a model instance that overrides the default constraints and values
+    m = MyModel(3, 4, bounds={'a': (1, None), 'b': (2, None)},
+                fixed={'a': True, 'b': False})
+    assert m.a.value == 3
+    assert m.b.value == 4
+    assert m.a.min == 1
+    assert m.b.min == 2
+    assert m.a.bounds == (1, None)
+    assert m.b.bounds == (2, None)
+    assert m.a.fixed is True
+    assert m.b.fixed is False
+    assert m.bounds == {'a': (1, None), 'b': (2, None)}
+    assert m.fixed == {'a': True, 'b': False}

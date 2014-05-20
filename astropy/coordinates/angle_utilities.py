@@ -263,7 +263,7 @@ class _AngleParser(object):
                     "Syntax error parsing angle {0!r}".format(angle))
 
         if unit is None and found_unit is None:
-                raise u.UnitsError("No unit specified")
+            raise u.UnitsError("No unit specified")
 
         return found_angle, found_unit
 
@@ -329,7 +329,7 @@ def parse_angle(angle, unit=None, debug=False):
             * -1h2m3s
 
     unit : `~astropy.units.UnitBase` instance, optional
-        The unit used to interpret the string.  If `unit` is not
+        The unit used to interpret the string.  If ``unit`` is not
         provided, the unit must be explicitly represented in the
         string, either at the end or as number separators.
 
@@ -339,8 +339,8 @@ def parse_angle(angle, unit=None, debug=False):
     Returns
     -------
     value, unit : tuple
-        `value` is the value as a floating point number or three-part
-        tuple, and `unit` is a `Unit` instance which is either the
+        ``value`` is the value as a floating point number or three-part
+        tuple, and ``unit`` is a `Unit` instance which is either the
         unit passed in or the one explicitly mentioned in the input
         string.
     """
@@ -517,7 +517,8 @@ def sexagesimal_to_string(values, precision=None, pad=False, sep=(':',),
     values = (values[0], np.abs(values[1]), np.abs(values[2]))
 
     if pad:
-        if values[0] < 0:
+        # Check to see if values[0] is negative, using np.copysign to handle -0
+        if np.copysign(1.0, values[0]) == -1:
             pad = 3
         else:
             pad = 2
@@ -527,17 +528,24 @@ def sexagesimal_to_string(values, precision=None, pad=False, sep=(':',),
     if not isinstance(sep, tuple):
         sep = tuple(sep)
 
-    if len(sep) == 1:
-        sep = sep + (sep[0], '')
+    if fields < 1 or fields > 3:
+        raise ValueError(
+            "fields must be 1, 2, or 3")
+
+    if not sep:  # empty string, False, or None, etc.
+        sep = ('', '', '')
+    elif len(sep) == 1:
+        if fields == 3:
+            sep = sep + (sep[0], '')
+        elif fields == 2:
+            sep = sep + ('', '')
+        else:
+            sep = ('', '', '')
     elif len(sep) == 2:
         sep = sep + ('',)
     elif len(sep) != 3:
         raise ValueError(
             "Invalid separator specification for converting angle to string.")
-
-    if fields < 1 or fields > 3:
-        raise ValueError(
-            "fields must be 1, 2, or 3")
 
     # Simplify the expression based on the requested precision.  For
     # example, if the seconds will round up to 60, we should convert
@@ -588,7 +596,7 @@ def hours_to_string(h, precision=5, pad=False, sep=('h', 'm', 's'),
     Takes a decimal hour value and returns a string formatted as hms with
     separator specified by the 'sep' parameter.
 
-    `h` must be a scalar.
+    ``h`` must be a scalar.
     """
     h, m, s = hours_to_hms(h)
     return sexagesimal_to_string((h, m, s), precision=precision, pad=pad,
@@ -600,7 +608,7 @@ def degrees_to_string(d, precision=5, pad=False, sep=':', fields=3):
     Takes a decimal hour value and returns a string formatted as dms with
     separator specified by the 'sep' parameter.
 
-    `d` must be a scalar.
+    ``d`` must be a scalar.
     """
     d, m, s = degrees_to_dms(d)
     return sexagesimal_to_string((d, m, s), precision=precision, pad=pad,
@@ -609,18 +617,19 @@ def degrees_to_string(d, precision=5, pad=False, sep=':', fields=3):
 
 def angular_separation(lon1, lat1, lon2, lat2):
     """
-    Angular separation between two points on a sphere
+    Angular separation between two points on a sphere.
 
     Parameters
     ----------
-    lon1, lat1, lon2, lat2 : Angle, Quantity or float
-        Longitude and latitude of the two points.  Quantities should be in
-        angular units; floats in radians
+    lon1, lat1, lon2, lat2 : `Angle`, `~astropy.units.Quantity` or float
+        Longitude and latitude of the two points. Quantities should be in
+        angular units; floats in radians.
 
     Returns
     -------
-    angular separation : Quantity or float
-        Type depends on input; Quantity in angular units, or float in radians
+    angular separation : `~astropy.units.Quantity` or float
+        Type depends on input; `Quantity` in angular units, or float in
+        radians.
 
     Notes
     -----
@@ -644,3 +653,32 @@ def angular_separation(lon1, lat1, lon2, lat2):
     denominator = slat1 * slat2 + clat1 * clat2 * cdlon
 
     return np.arctan2(np.sqrt(num1 ** 2 + num2 ** 2), denominator)
+
+
+def position_angle(lon1, lat1, lon2, lat2):
+    """
+    Position Angle (East of North) between two points on a sphere.
+
+    Parameters
+    ----------
+    lon1, lat1, lon2, lat2 : `Angle`, `~astropy.units.Quantity` or float
+        Longitude and latitude of the two points. Quantities should be in
+        angular units; floats in radians.
+
+    Returns
+    -------
+    pa : `~astropy.coordinates.Angle`
+        The (positive) position angle of the vector pointing from position 1 to
+        position 2.  If any of the angles are arrays, this will contain an array
+        following the appropriate `numpy` broadcasting rules.
+
+    """
+    from .angles import Angle
+
+    deltalon = lon2 - lon1
+    colat = np.cos(lat2)
+
+    x = np.sin(lat2) * np.cos(lat1) - colat * np.sin(lat1) * np.cos(deltalon)
+    y = np.sin(deltalon) * colat
+
+    return Angle(np.arctan2(y, x)).wrap_at(360*u.deg)

@@ -12,10 +12,13 @@ import copy
 import numpy as np
 from numpy.testing import (assert_allclose, assert_array_equal,
                            assert_array_almost_equal)
+from distutils import version
+NUMPY_VERSION = version.LooseVersion(np.__version__)
 
 from ...tests.helper import raises, pytest
 from ...utils import isiterable
 from ... import units as u
+from ...units.quantity import _UNIT_NOT_INITIALISED
 from ...extern.six.moves import xrange
 from ...extern.six.moves import cPickle as pickle
 from ...extern import six
@@ -119,6 +122,54 @@ class TestQuantityCreation(object):
         q4 = u.Quantity(q0, u.cm / u.s, copy=False)
         assert q4 is not q0
         assert q4.base is not q0.base
+
+    def test_subok(self):
+        """Test subok can be used to keep class, or to insist on Quantity"""
+        class MyQuantitySubclass(u.Quantity):
+            pass
+
+        myq = MyQuantitySubclass(np.arange(10.), u.m)
+        # try both with and without changing the unit
+        assert type(u.Quantity(myq)) is u.Quantity
+        assert type(u.Quantity(myq, subok=True)) is MyQuantitySubclass
+        assert type(u.Quantity(myq, u.km)) is u.Quantity
+        assert type(u.Quantity(myq, u.km, subok=True)) is MyQuantitySubclass
+
+    def test_order(self):
+        """Test that order is correctly propagated to np.array"""
+        ac = np.array(np.arange(10.), order='C')
+        qcc = u.Quantity(ac, u.m, order='C')
+        assert qcc.flags['C_CONTIGUOUS']
+        qcf = u.Quantity(ac, u.m, order='F')
+        assert qcf.flags['F_CONTIGUOUS']
+        qca = u.Quantity(ac, u.m, order='A')
+        assert qca.flags['C_CONTIGUOUS']
+        # check it works also when passing in a quantity
+        assert u.Quantity(qcc, order='C').flags['C_CONTIGUOUS']
+        assert u.Quantity(qcc, order='A').flags['C_CONTIGUOUS']
+        assert u.Quantity(qcc, order='F').flags['F_CONTIGUOUS']
+
+        af = np.array(np.arange(10.), order='F')
+        qfc = u.Quantity(af, u.m, order='C')
+        assert qfc.flags['C_CONTIGUOUS']
+        qff = u.Quantity(ac, u.m, order='F')
+        assert qff.flags['F_CONTIGUOUS']
+        qfa = u.Quantity(af, u.m, order='A')
+        assert qfa.flags['F_CONTIGUOUS']
+        assert u.Quantity(qff, order='C').flags['C_CONTIGUOUS']
+        assert u.Quantity(qff, order='A').flags['F_CONTIGUOUS']
+        assert u.Quantity(qff, order='F').flags['F_CONTIGUOUS']
+
+    def test_ndmin(self):
+        """Test that ndmin is correctly propagated to np.array"""
+        a = np.arange(10.)
+        q1 = u.Quantity(a, u.m, ndmin=1)
+        assert q1.ndim == 1 and q1.shape == (10,)
+        q2 = u.Quantity(a, u.m, ndmin=2)
+        assert q2.ndim == 2 and q2.shape == (1, 10)
+        # check it works also when passing in a quantity
+        q3 = u.Quantity(q1, u.m, ndmin=3)
+        assert q3.ndim == 3 and q3.shape == (1, 1, 10)
 
 
 class TestQuantityOperations(object):
@@ -319,8 +370,15 @@ class TestQuantityOperations(object):
         assert 1 * u.m == 100 * u.cm
         assert 1 * u.m != 1 * u.cm
 
-        # here one is a unit, which is an invalid comparison
-        assert 1. * u.cm * u.cm * u.cm != u.cm ** 3
+        # when one is a unit, Quantity does not know what to do,
+        # but unit is fine with it, so it still works
+        unit = u.cm**3
+        q = 1. * unit
+        assert q.__eq__(unit) is NotImplemented
+        assert unit.__eq__(q) is True
+        assert q == unit
+        q = 1000. * u.mm**3
+        assert q == unit
 
         # mismatched types should never work
         assert not 1. * u.cm == 1.
@@ -329,6 +387,7 @@ class TestQuantityOperations(object):
     def test_numeric_converters(self):
         # float, int, long, and __index__ should only work for single
         # quantities, of appropriate type, and only if they are dimensionless.
+        # for index, this should be unscaled as well
         # (Check on __index__ is also a regression test for #1557)
 
         # quantities with units should never convert, or be usable as an index
@@ -355,21 +414,14 @@ class TestQuantityOperations(object):
             q1 * ['a', 'b', 'c']
         assert exc.value.args[0] == index_err_msg
 
-        # dimensionless but scaled is also not OK
+        # dimensionless but scaled is OK, however
         q2 = u.Quantity(1.23, u.m / u.km)
 
-        with pytest.raises(TypeError) as exc:
-            float(q2)
-        assert exc.value.args[0] == converter_err_msg
-
-        with pytest.raises(TypeError) as exc:
-            int(q2)
-        assert exc.value.args[0] == converter_err_msg
+        assert float(q2) == float(q2.to(u.dimensionless_unscaled).value)
+        assert int(q2) == int(q2.to(u.dimensionless_unscaled).value)
 
         if six.PY2:
-            with pytest.raises(TypeError) as exc:
-                long(q2)
-            assert exc.value.args[0] == converter_err_msg
+            assert long(q2) == long(q2.to(u.dimensionless_unscaled).value)
 
         with pytest.raises(TypeError) as exc:
             q2 * ['a', 'b', 'c']
@@ -473,6 +525,10 @@ def test_quantity_conversion_equivalency_passed_on():
     assert q5.unit == u.nm
     assert_allclose(q4.value, q5.value)
 
+# Regression test for issue #2315, divide-by-zero error when examining 0*unit
+def test_self_equivalency():
+    assert u.deg.is_equivalent(0*u.radian)
+    assert u.deg.is_equivalent(1*u.radian)
 
 def test_si():
     q1 = 10. * u.m * u.s ** 2 / (200. * u.ms) ** 2  # 250 meters
@@ -511,8 +567,9 @@ class TestQuantityComparison(object):
     def test_quantity_equality(self):
         assert u.Quantity(1000, unit='m') == u.Quantity(1, unit='km')
         assert not (u.Quantity(1, unit='m') == u.Quantity(1, unit='km'))
-        with pytest.raises(u.UnitsError):
-            u.Quantity(1, unit='m') == u.Quantity(1, unit='s')
+        # for ==, !=, return False, True if units do not match
+        assert (u.Quantity(1100, unit=u.m) != u.Quantity(1, unit=u.s)) is True
+        assert (u.Quantity(1100, unit=u.m) == u.Quantity(1, unit=u.s)) is False
 
     def test_quantity_comparison(self):
         assert u.Quantity(1100, unit=u.meter) > u.Quantity(1, unit=u.kilometer)
@@ -538,9 +595,6 @@ class TestQuantityComparison(object):
             assert u.Quantity(1100, unit=u.meter) <= u.Quantity(1, unit=u.second)
 
         assert u.Quantity(1200, unit=u.meter) != u.Quantity(1, unit=u.kilometer)
-
-        with pytest.raises(u.UnitsError):
-            assert u.Quantity(1100, unit=u.meter) != u.Quantity(1, unit=u.second)
 
 
 class TestQuantityDisplay(object):
@@ -580,6 +634,20 @@ class TestQuantityDisplay(object):
         assert format(self.scalarintq, '02d') == "01 m"
         assert format(self.scalarfloatq, '.1f') == "1.3 m"
         assert format(self.scalarfloatq, '.0f') == "1 m"
+
+    def test_uninitialized_unit_format(self):
+        bad_quantity = np.arange(10.).view(u.Quantity)
+        assert str(bad_quantity).endswith(_UNIT_NOT_INITIALISED)
+        assert repr(bad_quantity).endswith(_UNIT_NOT_INITIALISED + '>')
+
+    def test_repr_latex(self):
+        q2 = u.Quantity(1.5e14, 'm/s')
+        assert self.scalarintq._repr_latex_() == '$1 \\; \\mathrm{m}$'
+        assert self.scalarfloatq._repr_latex_() == '$1.3 \\; \\mathrm{m}$'
+        assert (q2._repr_latex_() ==
+                '$1.5\\times 10^{+14} \\; \\mathrm{\\frac{m}{s}}$')
+        with pytest.raises(NotImplementedError):
+            self.arrq._repr_latex_()
 
 
 def test_decompose():
@@ -810,14 +878,30 @@ def test_quantity_iterability():
 
 def test_copy():
 
-    q1 = u.Quantity(np.array([1., 2., 3.]), unit=u.m)
+    q1 = u.Quantity(np.array([[1., 2., 3.], [4., 5., 6.]]), unit=u.m)
     q2 = q1.copy()
 
     assert np.all(q1.value == q2.value)
     assert q1.unit == q2.unit
     assert q1.dtype == q2.dtype
-
     assert q1.value is not q2.value
+
+    if NUMPY_VERSION < version.LooseVersion('1.6.0'):
+        return  # numpy 1.5 doesn't allow arguments to `copy`
+
+    q3 = q1.copy(order='F')
+    assert q3.flags['F_CONTIGUOUS']
+    assert np.all(q1.value == q3.value)
+    assert q1.unit == q3.unit
+    assert q1.dtype == q3.dtype
+    assert q1.value is not q3.value
+
+    q4 = q1.copy(order='C')
+    assert q4.flags['C_CONTIGUOUS']
+    assert np.all(q1.value == q4.value)
+    assert q1.unit == q4.unit
+    assert q1.dtype == q4.dtype
+    assert q1.value is not q4.value
 
 
 def test_deepcopy():
@@ -888,3 +972,42 @@ def test_quantity_to_view():
     q2 = q1.to(u.km)
     assert q1.value[0] == 1000
     assert q2.value[0] == 1
+
+
+@raises(ValueError)
+def test_quantity_tuple_power():
+    (5.0 * u.m) ** (1, 2)
+
+
+def test_inherit_docstrings():
+    assert u.Quantity.argmax.__doc__ == np.ndarray.argmax.__doc__
+
+
+def test_quantity_from_table():
+    """
+    Checks that units from tables are respected when converted to a Quantity.
+    This also generically checks the use of *anything* with a `unit` attribute
+    passed into Quantity
+    """
+    from... table import Table
+
+    t = Table(data=[np.arange(5), np.arange(5)], names=['a', 'b'])
+    t['a'].unit = u.kpc
+
+    qa = u.Quantity(t['a'])
+    assert qa.unit == u.kpc
+    assert_array_equal(qa.value, t['a'])
+
+    qb = u.Quantity(t['b'])
+    assert qb.unit == u.dimensionless_unscaled
+    assert_array_equal(qb.value, t['b'])
+
+    # This does *not* auto-convert, because it's not necessarily obvious that's
+    # desired.  Instead we revert to standard `Quantity` behavior
+    qap = u.Quantity(t['a'], u.pc)
+    assert qap.unit == u.pc
+    assert_array_equal(qap.value, t['a'] * 1000)
+
+    qbp = u.Quantity(t['b'], u.pc)
+    assert qbp.unit == u.pc
+    assert_array_equal(qbp.value, t['b'])

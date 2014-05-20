@@ -36,7 +36,7 @@ def get_graphviz_version():
         return '0'
     tokens = output.split()
     for token in tokens:
-        if re.match(b'[0-9.]*', token):
+        if re.match(b'[0-9.]+', token):
             return token.decode('ascii')
     return '0'
 
@@ -44,7 +44,7 @@ graphviz_found = LooseVersion(get_graphviz_version())
 graphviz_broken = LooseVersion('0.30')
 
 if graphviz_found >= graphviz_broken:
-    needs_sphinx = '1.2b2'
+    needs_sphinx = '1.2'
 else:
     needs_sphinx = '1.1'
 
@@ -55,7 +55,7 @@ intersphinx_mapping = {
     'scipy': ('http://docs.scipy.org/doc/scipy/reference/', None),
     'matplotlib': ('http://matplotlib.sourceforge.net/', None),
     'astropy': ('http://docs.astropy.org/en/stable/', None),
-    'h5py': ('http://h5py.alfven.org/docs-2.1/', None)
+    'h5py': ('http://docs.h5py.org/en/latest/', None)
     }
 
 # List of patterns, relative to source directory, that match files and
@@ -126,15 +126,23 @@ extensions = [
     'sphinx.ext.todo',
     'sphinx.ext.coverage',
     'sphinx.ext.pngmath',
-    'sphinx.ext.viewcode',
     'sphinx.ext.inheritance_diagram',
     'astropy.sphinx.ext.numpydoc',
     'astropy.sphinx.ext.astropyautosummary',
     'astropy.sphinx.ext.automodsumm',
     'astropy.sphinx.ext.automodapi',
     'astropy.sphinx.ext.tocdepthfix',
-    'astropy.sphinx.ext.doctest'
+    'astropy.sphinx.ext.doctest',
+    'astropy.sphinx.ext.changelog_links',
+    'astropy.sphinx.ext.viewcode',  # Use patched version of viewcode
+    'astropy.sphinx.ext.smart_resolver'
     ]
+
+# Above, we use a patched version of viewcode rather than 'sphinx.ext.viewcode'
+# This can be changed to the sphinx version once the following issue is fixed
+# in sphinx:
+# https://bitbucket.org/birkenfeld/sphinx/issue/623/
+# extension-viewcode-fails-with-function
 
 try:
     import matplotlib.sphinxext.plot_directive
@@ -154,6 +162,10 @@ numpydoc_show_class_members = False
 autosummary_generate = True
 
 automodapi_toctreedirnm = 'api'
+
+# Class documentation should contain *both* the class docstring and
+# the __init__ docstring
+autoclass_content = "both"
 
 
 # -- Options for HTML output -------------------------------------------------

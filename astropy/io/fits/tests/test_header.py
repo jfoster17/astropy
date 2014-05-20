@@ -1,10 +1,18 @@
+# -*- coding: utf-8 -*-
 # Licensed under a 3-clause BSD style license - see PYFITS.rst
 
+
 import itertools
+import sys
 import warnings
+
+from io import StringIO, BytesIO
 
 import numpy as np
 
+from ....extern import six
+from ....extern.six import u, iterkeys, itervalues, iteritems
+from ....extern.six.moves import zip
 from ....io import fits
 from ....io.fits.verify import VerifyWarning
 from ....tests.helper import pytest, catch_warnings
@@ -12,6 +20,7 @@ from ....tests.helper import pytest, catch_warnings
 from . import FitsTestCase
 from .util import ignore_warnings
 from ..card import _pad
+from ..header import _pad_length, BLOCK_SIZE
 from ..util import encode_ascii
 
 
@@ -433,8 +442,8 @@ class TestHeaderFunctions(FitsTestCase):
         h1['TEST'] = 'abcdefg' * 30
 
         h2 = fits.Header()
-        with warnings.catch_warnings(record=True) as w:
-            h2['TEST'] = u'abcdefg' * 30
+        with catch_warnings() as w:
+            h2['TEST'] = u('abcdefg' * 30)
             assert len(w) == 0
 
         assert str(h1) == str(h2)
@@ -958,21 +967,21 @@ class TestHeaderFunctions(FitsTestCase):
 
     def test_header_items(self):
         header = fits.Header([('A', 'B'), ('C', 'D')])
-        assert header.items() == list(header.iteritems())
+        assert list(header.items()) == list(iteritems(header))
 
     def test_header_iterkeys(self):
         header = fits.Header([('A', 'B'), ('C', 'D')])
-        for a, b in itertools.izip(header.iterkeys(), header):
+        for a, b in zip(iterkeys(header), header):
             assert a == b
 
     def test_header_itervalues(self):
         header = fits.Header([('A', 'B'), ('C', 'D')])
-        for a, b in itertools.izip(header.itervalues(), ['B', 'D']):
+        for a, b in zip(itervalues(header), ['B', 'D']):
             assert a == b
 
     def test_header_keys(self):
         hdul = fits.open(self.data('arange.fits'))
-        assert (hdul[0].header.keys() ==
+        assert (list(hdul[0].header) ==
                 ['SIMPLE', 'BITPIX', 'NAXIS', 'NAXIS1', 'NAXIS2', 'NAXIS3',
                  'EXTEND'])
 
@@ -983,17 +992,17 @@ class TestHeaderFunctions(FitsTestCase):
         last = header.pop()
         assert last == 'H'
         assert len(header) == 3
-        assert header.keys() == ['A', 'C', 'E']
+        assert list(header) == ['A', 'C', 'E']
 
         mid = header.pop(1)
         assert mid == 'D'
         assert len(header) == 2
-        assert header.keys() == ['A', 'E']
+        assert list(header) == ['A', 'E']
 
         first = header.pop(0)
         assert first == 'B'
         assert len(header) == 1
-        assert header.keys() == ['E']
+        assert list(header) == ['E']
 
         pytest.raises(IndexError, header.pop, 42)
 
@@ -1005,17 +1014,17 @@ class TestHeaderFunctions(FitsTestCase):
         last = header.pop('G')
         assert last == 'H'
         assert len(header) == 3
-        assert header.keys() == ['A', 'C', 'E']
+        assert list(header) == ['A', 'C', 'E']
 
         mid = header.pop('C')
         assert mid == 'D'
         assert len(header) == 2
-        assert header.keys() == ['A', 'E']
+        assert list(header) == ['A', 'E']
 
         first = header.pop('A')
         assert first == 'B'
         assert len(header) == 1
-        assert header.keys() == ['E']
+        assert list(header) == ['E']
 
         default = header.pop('X', 'Y')
         assert default == 'Y'
@@ -1108,7 +1117,7 @@ class TestHeaderFunctions(FitsTestCase):
         # operation when the header is coming from another HDU
         hdu.header.extend(hdu2.header, strip=False)
         assert len(hdu.header) == 11
-        assert hdu.header.keys()[5] == 'XTENSION'
+        assert list(hdu.header)[5] == 'XTENSION'
         assert hdu.header[-1] == 'some val'
         assert ('MYKEY', 1) in hdu.header
 
@@ -1221,7 +1230,7 @@ class TestHeaderFunctions(FitsTestCase):
         header = fits.Header([('A', 'B'), ('C', 'D')])
         header.append('E')
         assert len(header) == 3
-        assert header.keys()[-1] == 'E'
+        assert list(header)[-1] == 'E'
         assert header[-1] == ''
         assert header.comments['E'] == ''
 
@@ -1231,7 +1240,7 @@ class TestHeaderFunctions(FitsTestCase):
         header.append('')
         assert len(header) == 4
 
-        assert header.keys()[-1] == ''
+        assert list(header)[-1] == ''
         assert header[''] == ''
         assert header.comments[''] == ''
 
@@ -1254,6 +1263,43 @@ class TestHeaderFunctions(FitsTestCase):
         assert len(header) == 5
         assert header[1] == 'H'
         assert header[-1] == ''
+
+    def test_header_insert_before_keyword(self):
+        """
+        Test that a keyword name or tuple can be used to insert new keywords.
+
+        Also tests the ``after`` keyword argument.
+
+        Regression test for https://github.com/spacetelescope/PyFITS/issues/12
+        """
+
+        header = fits.Header([
+            ('NAXIS1', 10), ('COMMENT', 'Comment 1'),
+            ('COMMENT', 'Comment 3')])
+
+        header.insert('NAXIS1', ('NAXIS', 2, 'Number of axes'))
+        assert list(header.keys())[0] == 'NAXIS'
+        assert header[0] == 2
+        assert header.comments[0] == 'Number of axes'
+
+        header.insert('NAXIS1', ('NAXIS2', 20), after=True)
+        assert list(header.keys())[1] == 'NAXIS1'
+        assert list(header.keys())[2] == 'NAXIS2'
+        assert header[2] == 20
+
+        header.insert(('COMMENT', 1), ('COMMENT', 'Comment 2'))
+        assert header['COMMENT'] == ['Comment 1', 'Comment 2', 'Comment 3']
+
+        header.insert(('COMMENT', 2), ('COMMENT', 'Comment 4'), after=True)
+        assert header['COMMENT'] == ['Comment 1', 'Comment 2', 'Comment 3',
+                                     'Comment 4']
+
+        header.insert(-1, ('TEST1', True))
+        assert list(header.keys())[-2] == 'TEST1'
+
+        header.insert(-1, ('TEST2', True), after=True)
+        assert list(header.keys())[-1] == 'TEST2'
+        assert list(header.keys())[-3] == 'TEST1'
 
     def test_header_comments(self):
         header = fits.Header([('A', 'B', 'C'), ('DEF', 'G', 'H')])
@@ -1301,7 +1347,7 @@ class TestHeaderFunctions(FitsTestCase):
     def test_commentary_slicing(self):
         header = fits.Header()
 
-        indices = range(5)
+        indices = list(range(5))
 
         for idx in indices:
             header['HISTORY'] = idx
@@ -1351,6 +1397,22 @@ class TestHeaderFunctions(FitsTestCase):
         header['HISTORY'][:] = ['BAZ', 'QUX']
         assert header['HISTORY'] == ['BAZ', 'QUX', 'BAR']
 
+    def test_commentary_comparison(self):
+        """
+        Regression test for an issue found in *writing* the regression test for
+        https://github.com/astropy/astropy/issues/2363, where comparison of
+        the list of values for a commentary keyword did not always compare
+        correctly with other iterables.
+        """
+
+        header = fits.Header()
+        header['HISTORY'] = 'hello world'
+        header['HISTORY'] = 'hello world'
+        header['COMMENT'] = 'hello world'
+        assert header['HISTORY'] != header['COMMENT']
+        header['COMMENT'] = 'hello world'
+        assert header['HISTORY'] == header['COMMENT']
+
     def test_long_commentary_card(self):
         header = fits.Header()
         header['FOO'] = 'BAR'
@@ -1361,7 +1423,7 @@ class TestHeaderFunctions(FitsTestCase):
         header['HISTORY'] = longval
 
         assert len(header) == 7
-        assert header.keys()[2] == 'FRED'
+        assert list(header)[2] == 'FRED'
         assert str(header.cards[3]) == 'HISTORY ' + longval[:72]
         assert str(header.cards[4]).rstrip() == 'HISTORY ' + longval[72:]
 
@@ -1429,6 +1491,79 @@ class TestHeaderFunctions(FitsTestCase):
         pytest.raises(ValueError, header.insert, len(header), 'END')
         pytest.raises(ValueError, header.set, 'END')
 
+    def test_invalid_end_cards(self):
+        """
+        Regression test for https://trac.assembla.com/pyfits/ticket/217
+
+        This tests the case where the END card looks like a normal card like
+        'END = ' and other similar oddities.  As long as a card starts with END
+        and looks like it was intended to be the END card we allow it, but with
+        a warning.
+        """
+
+        horig = fits.PrimaryHDU(data=np.arange(100)).header
+
+        def invalid_header(end, pad):
+            # Build up a goofy invalid header
+            # Start from a seemingly normal header
+            s = horig.tostring(sep='', endcard=False, padding=False)
+            # append the bogus end card
+            s += end
+            # add additional padding if requested
+            if pad:
+                s += ' ' * _pad_length(len(s))
+
+            # This will differ between Python versions
+            if isinstance(s, bytes):
+                return BytesIO(s)
+            else:
+                return StringIO(s)
+
+        # Basic case motivated by the original issue; it's as if the END card
+        # was appened by software that doesn't know to treat it specially, and
+        # it is given an = after it
+        s = invalid_header('END =', True)
+
+        with catch_warnings() as w:
+            h = fits.Header.fromfile(s)
+            assert h == horig
+            assert len(w) == 1
+            assert str(w[0].message).startswith(
+                "Unexpected bytes trailing END keyword: ' ='")
+
+        # A case similar to the last but with more spaces between END and the
+        # =, as though the '= ' value indicator were placed like that of a
+        # normal card
+        s = invalid_header('END     = ', True)
+        with catch_warnings() as w:
+            h = fits.Header.fromfile(s)
+            assert h == horig
+            assert len(w) == 1
+            assert str(w[0].message).startswith(
+                "Unexpected bytes trailing END keyword: '     ='")
+
+        # END card with trailing gibberish
+        s = invalid_header('END$%&%^*%*', True)
+        with catch_warnings() as w:
+            h = fits.Header.fromfile(s)
+            assert h == horig
+            assert len(w) == 1
+            assert str(w[0].message).startswith(
+                "Unexpected bytes trailing END keyword: '$%&%^*%*'")
+
+        # 'END' at the very end of a truncated file without padding; the way
+        # the block reader works currently this can only happen if the 'END'
+        # is at the very end of the file.
+        s = invalid_header('END', False)
+        with catch_warnings() as w:
+            # Don't raise an exception on missing padding, but still produce a
+            # warning that the END card is incomplete
+            h = fits.Header.fromfile(s, padding=False)
+            assert h == horig
+            assert len(w) == 1
+            assert str(w[0].message).startswith(
+                "Missing padding to end of the FITS block")
+
     def test_unnecessary_move(self):
         """
         Regression test for https://trac.assembla.com/pyfits/ticket/125
@@ -1440,33 +1575,33 @@ class TestHeaderFunctions(FitsTestCase):
         header = fits.Header([('A', 'B'), ('B', 'C'), ('C', 'D')])
 
         header.set('B', before=2)
-        assert header.keys() == ['A', 'B', 'C']
+        assert list(header) == ['A', 'B', 'C']
         assert not header._modified
 
         header.set('B', after=0)
-        assert header.keys() == ['A', 'B', 'C']
+        assert list(header) == ['A', 'B', 'C']
         assert not header._modified
 
         header.set('B', before='C')
-        assert header.keys() == ['A', 'B', 'C']
+        assert list(header) == ['A', 'B', 'C']
         assert not header._modified
 
         header.set('B', after='A')
-        assert header.keys() == ['A', 'B', 'C']
+        assert list(header) == ['A', 'B', 'C']
         assert not header._modified
 
         header.set('B', before=2)
-        assert header.keys() == ['A', 'B', 'C']
+        assert list(header) == ['A', 'B', 'C']
         assert not header._modified
 
         # 123 is well past the end, and C is already at the end, so it's in the
         # right place already
         header.set('C', before=123)
-        assert header.keys() == ['A', 'B', 'C']
+        assert list(header) == ['A', 'B', 'C']
         assert not header._modified
 
         header.set('C', after=123)
-        assert header.keys() == ['A', 'B', 'C']
+        assert list(header) == ['A', 'B', 'C']
         assert not header._modified
 
     def test_invalid_float_cards(self):
@@ -1609,7 +1744,7 @@ class TestHeaderFunctions(FitsTestCase):
         """
 
         h = fits.Header([('abC', 1), ('Def', 2), ('GeH', 3)])
-        assert h.keys() == ['ABC', 'DEF', 'GEH']
+        assert list(h) == ['ABC', 'DEF', 'GEH']
         assert 'abc' in h
         assert 'dEf' in h
 
@@ -1625,14 +1760,14 @@ class TestHeaderFunctions(FitsTestCase):
         assert len(h) == 3
 
         del h['gEh']
-        assert h.keys() == ['ABC', 'DEF']
+        assert list(h) == ['ABC', 'DEF']
         assert len(h) == 2
         assert h.get('def') == 2
 
         h.set('Abc', 3)
         assert h['ABC'] == 3
         h.set('gEh', 3, before='Abc')
-        assert h.keys() == ['GEH', 'ABC', 'DEF']
+        assert list(h) == ['GEH', 'ABC', 'DEF']
 
         assert h.pop('abC') == 3
         assert len(h) == 2
@@ -1641,11 +1776,11 @@ class TestHeaderFunctions(FitsTestCase):
         assert len(h) == 2
         assert h.setdefault('aBc', 1) == 1
         assert len(h) == 3
-        assert h.keys() == ['GEH', 'DEF', 'ABC']
+        assert list(h) == ['GEH', 'DEF', 'ABC']
 
         h.update({'GeH': 1, 'iJk': 4})
         assert len(h) == 4
-        assert h.keys() == ['GEH', 'DEF', 'ABC', 'IJK']
+        assert list(h) == ['GEH', 'DEF', 'ABC', 'IJK']
         assert h['GEH'] == 1
 
         assert h.count('ijk') == 1
@@ -1653,7 +1788,7 @@ class TestHeaderFunctions(FitsTestCase):
 
         h.remove('Def')
         assert len(h) == 3
-        assert h.keys() == ['GEH', 'ABC', 'IJK']
+        assert list(h) == ['GEH', 'ABC', 'IJK']
 
     def test_end_in_comment(self):
         """
@@ -1706,42 +1841,64 @@ class TestHeaderFunctions(FitsTestCase):
         Also tests unicode for keywords and comments.
         """
 
-        erikku = u'\u30a8\u30ea\u30c3\u30af'
+        erikku = u('\u30a8\u30ea\u30c3\u30af')
 
         def assign(keyword, val):
             h[keyword] = val
 
         h = fits.Header()
-        h[u'FOO'] = 'BAR'
+        h[u('FOO')] = 'BAR'
         assert 'FOO' in h
         assert h['FOO'] == 'BAR'
-        assert h[u'FOO'] == 'BAR'
+        assert h[u('FOO')] == 'BAR'
         assert repr(h) == _pad("FOO     = 'BAR     '")
         pytest.raises(ValueError, assign, erikku, 'BAR')
 
-        h['FOO'] = u'BAZ'
-        assert h[u'FOO'] == 'BAZ'
-        assert h[u'FOO'] == u'BAZ'
+        h['FOO'] = u('BAZ')
+        assert h[u('FOO')] == 'BAZ'
+        assert h[u('FOO')] == u('BAZ')
         assert repr(h) == _pad("FOO     = 'BAZ     '")
         pytest.raises(ValueError, assign, 'FOO', erikku)
 
-        h['FOO'] = ('BAR', u'BAZ')
+        h['FOO'] = ('BAR', u('BAZ'))
         assert h['FOO'] == 'BAR'
-        assert h['FOO'] == u'BAR'
+        assert h['FOO'] == u('BAR')
         assert h.comments['FOO'] == 'BAZ'
-        assert h.comments['FOO'] == u'BAZ'
+        assert h.comments['FOO'] == u('BAZ')
         assert repr(h) == _pad("FOO     = 'BAR     '           / BAZ")
 
-        h['FOO'] = (u'BAR', u'BAZ')
+        h['FOO'] = (u('BAR'), u('BAZ'))
         assert h['FOO'] == 'BAR'
-        assert h['FOO'] == u'BAR'
+        assert h['FOO'] == u('BAR')
         assert h.comments['FOO'] == 'BAZ'
-        assert h.comments['FOO'] == u'BAZ'
+        assert h.comments['FOO'] == u('BAZ')
         assert repr(h) == _pad("FOO     = 'BAR     '           / BAZ")
 
         pytest.raises(ValueError, assign, 'FOO', ('BAR', erikku))
         pytest.raises(ValueError, assign, 'FOO', (erikku, 'BAZ'))
         pytest.raises(ValueError, assign, 'FOO', (erikku, erikku))
+
+    def test_assign_non_ascii(self):
+        """
+        First regression test for
+        https://github.com/spacetelescope/PyFITS/issues/37
+
+        Although test_assign_unicode ensures that Python 2 `unicode` objects
+        and Python 3 `str` objects containing non-ASCII characters cannot be
+        assigned to headers, there is a bug that allows Python 2 `str` objects
+        of arbitrary encoding containing non-ASCII characters to be passed
+        through.
+
+        On Python 3 it should not be possible to assign bytes to a header at
+        all.
+        """
+
+        h = fits.Header()
+        if six.PY3:
+            pytest.raises(ValueError, h.set, 'TEST',
+                          bytes('Hello', encoding='ascii'))
+        elif six.PY2:
+            pytest.raises(ValueError, h.set, 'TEST', str('ñ'))
 
     def test_header_strip_whitespace(self):
         """
@@ -1750,7 +1907,8 @@ class TestHeaderFunctions(FitsTestCase):
         of a header value.
 
         By default extra whitespace is stripped off, but if
-        fits.STRIP_HEADER_WHITESPACE = False it should not be stripped.
+        `fits.conf.strip_header_whitespace` = False it should not be
+        stripped.
         """
 
         h = fits.Header()
@@ -1762,14 +1920,11 @@ class TestHeaderFunctions(FitsTestCase):
         assert h.cards['FOO'].image.rstrip() == "FOO     = 'Bar      '"
         assert h.cards['QUX'].image.rstrip() == "QUX     = 'Bar        '"
 
-        fits.STRIP_HEADER_WHITESPACE.set(False)
-        try:
+        with fits.conf.set_temp('strip_header_whitespace', False):
             assert h['FOO'] == 'Bar      '
             assert h['QUX'] == 'Bar        '
             assert h.cards['FOO'].image.rstrip() == "FOO     = 'Bar      '"
             assert h.cards['QUX'].image.rstrip() == "QUX     = 'Bar        '"
-        finally:
-            fits.STRIP_HEADER_WHITESPACE.set(True)
 
         assert h['FOO'] == 'Bar'
         assert h['QUX'] == 'Bar'
@@ -1876,6 +2031,148 @@ class TestHeaderFunctions(FitsTestCase):
         pytest.raises(ValueError, h.set, 'TEST', np.nan)
         pytest.raises(ValueError, h.set, 'TEST', float('inf'))
         pytest.raises(ValueError, h.set, 'TEST', np.inf)
+
+    def test_update_bool(self):
+        """
+        Regression test for an issue where a value of True in a header
+        cannot be updated to a value of 1, and likewise for False/0.
+        """
+
+        h = fits.Header([('TEST', True)])
+        h['TEST'] = 1
+        assert h['TEST'] is not True
+        assert isinstance(h['TEST'], int)
+        assert h['TEST'] == 1
+
+        h['TEST'] = np.bool_(True)
+        assert h['TEST'] is True
+
+        h['TEST'] = False
+        assert h['TEST'] is False
+        h['TEST'] = np.bool_(False)
+        assert h['TEST'] is False
+
+        h['TEST'] = 0
+        assert h['TEST'] is not False
+        assert isinstance(h['TEST'], int)
+        assert h['TEST'] == 0
+
+        h['TEST'] = np.bool_(False)
+        assert h['TEST'] is False
+
+    def test_update_numeric(self):
+        """
+        Regression test for https://github.com/spacetelescope/PyFITS/issues/49
+
+        Ensure that numeric values can be upcast/downcast between int, float,
+        and complex by assigning values that compare equal to the existing
+        value but are a different type.
+        """
+
+        h = fits.Header()
+        h['TEST'] = 1
+
+        # int -> float
+        h['TEST'] = 1.0
+        assert isinstance(h['TEST'], float)
+        assert str(h).startswith('TEST    =                  1.0')
+
+        # float -> int
+        h['TEST'] = 1
+        assert isinstance(h['TEST'], int)
+        assert str(h).startswith('TEST    =                    1')
+
+        # int -> complex
+        h['TEST'] = 1.0+0.0j
+        assert isinstance(h['TEST'], complex)
+        assert str(h).startswith('TEST    =           (1.0, 0.0)')
+
+        # complex -> float
+        h['TEST'] = 1.0
+        assert isinstance(h['TEST'], float)
+        assert str(h).startswith('TEST    =                  1.0')
+
+        # float -> complex
+        h['TEST'] = 1.0+0.0j
+        assert isinstance(h['TEST'], complex)
+        assert str(h).startswith('TEST    =           (1.0, 0.0)')
+
+        # complex -> int
+        h['TEST'] = 1
+        assert isinstance(h['TEST'], int)
+        assert str(h).startswith('TEST    =                    1')
+
+        # Now the same tests but with zeros
+        h['TEST'] = 0
+
+        # int -> float
+        h['TEST'] = 0.0
+        assert isinstance(h['TEST'], float)
+        assert str(h).startswith('TEST    =                  0.0')
+
+        # float -> int
+        h['TEST'] = 0
+        assert isinstance(h['TEST'], int)
+        assert str(h).startswith('TEST    =                    0')
+
+        # int -> complex
+        h['TEST'] = 0.0+0.0j
+        assert isinstance(h['TEST'], complex)
+        assert str(h).startswith('TEST    =           (0.0, 0.0)')
+
+        # complex -> float
+        h['TEST'] = 0.0
+        assert isinstance(h['TEST'], float)
+        assert str(h).startswith('TEST    =                  0.0')
+
+        # float -> complex
+        h['TEST'] = 0.0+0.0j
+        assert isinstance(h['TEST'], complex)
+        assert str(h).startswith('TEST    =           (0.0, 0.0)')
+
+        # complex -> int
+        h['TEST'] = 0
+        assert isinstance(h['TEST'], int)
+        assert str(h).startswith('TEST    =                    0')
+
+    def test_newlines_in_commentary(self):
+        """
+        Regression test for https://github.com/spacetelescope/PyFITS/issues/51
+
+        Test data extracted from a header in an actual FITS file found in the
+        wild.  Names have been changed to protect the innocent.
+        """
+
+        # First ensure that we can't assign new keyword values with newlines in
+        # them
+        h = fits.Header()
+        pytest.raises(ValueError, h.set, 'HISTORY', '\n')
+        pytest.raises(ValueError, h.set, 'HISTORY', '\nabc')
+        pytest.raises(ValueError, h.set, 'HISTORY', 'abc\n')
+        pytest.raises(ValueError, h.set, 'HISTORY', 'abc\ndef')
+
+        test_cards = [
+            "HISTORY File modified by user 'wilma' with fv  on 2013-04-22T21:42:18           "
+            "HISTORY File modified by user ' fred' with fv  on 2013-04-23T11:16:29           "
+            "HISTORY File modified by user ' fred' with fv  on 2013-11-04T16:59:14           "
+            "HISTORY File modified by user 'wilma' with fv  on 2013-04-22T21:42:18\nFile modif"
+            "HISTORY ied by user 'wilma' with fv  on 2013-04-23T11:16:29\nFile modified by use"
+            "HISTORY r ' fred' with fv  on 2013-11-04T16:59:14                               "
+            "HISTORY File modified by user 'wilma' with fv  on 2013-04-22T21:42:18\nFile modif"
+            "HISTORY ied by user 'wilma' with fv  on 2013-04-23T11:16:29\nFile modified by use"
+            "HISTORY r ' fred' with fv  on 2013-11-04T16:59:14\nFile modified by user 'wilma' "
+            "HISTORY with fv  on 2013-04-22T21:42:18\nFile modif\nied by user 'wilma' with fv  "
+            "HISTORY on 2013-04-23T11:16:29\nFile modified by use\nr ' fred' with fv  on 2013-1"
+            "HISTORY 1-04T16:59:14                                                           "
+        ]
+
+        for card_image in test_cards:
+            c = fits.Card.fromstring(card_image)
+
+            if '\n' in card_image:
+                pytest.raises(fits.VerifyError, c.verify, 'exception')
+            else:
+                c.verify('exception')
 
 
 class TestRecordValuedKeywordCards(FitsTestCase):
@@ -2052,6 +2349,28 @@ class TestRecordValuedKeywordCards(FitsTestCase):
         self._test_header['DP1.AXIS.1'] = 1.1
         assert self._test_header['DP1.AXIS.1'] == 1.1
 
+    def test_update_rvkc_2(self):
+        """Regression test for an issue that appeared after SVN r2412."""
+
+        h = fits.Header()
+        h['D2IM1.EXTVER'] = 1
+        assert h['D2IM1.EXTVER'] == 1.0
+        h['D2IM1.EXTVER'] = 2
+        assert h['D2IM1.EXTVER'] == 2.0
+
+    def test_raw_keyword_value(self):
+        c = fits.Card.fromstring("DP1     = 'NAXIS: 2' / A comment")
+        assert c.rawkeyword == 'DP1'
+        assert c.rawvalue == 'NAXIS: 2'
+
+        c = fits.Card('DP1.NAXIS', 2)
+        assert c.rawkeyword == 'DP1'
+        assert c.rawvalue == 'NAXIS: 2.0'
+
+        c = fits.Card('DP1.NAXIS', 2.0)
+        assert c.rawkeyword == 'DP1'
+        assert c.rawvalue == 'NAXIS: 2.0'
+
     def test_rvkc_insert_after(self):
         """
         It should be possible to insert a new RVKC after an existing one
@@ -2070,9 +2389,18 @@ class TestRecordValuedKeywordCards(FitsTestCase):
 
         del self._test_header['DP1.AXIS.1']
         assert len(self._test_header) == 7
-        assert self._test_header.keys()[0] == 'DP1.NAXIS'
+        assert list(self._test_header)[0] == 'DP1.NAXIS'
         assert self._test_header[0] == 2
-        assert self._test_header.keys()[1] == 'DP1.AXIS.2'
+        assert list(self._test_header)[1] == 'DP1.AXIS.2'
+        assert self._test_header[1] == 2
+
+        # Perform a subsequent delete to make sure all the index mappings were
+        # updated
+        del self._test_header['DP1.AXIS.2']
+        assert len(self._test_header) == 6
+        assert list(self._test_header)[0] == 'DP1.NAXIS'
+        assert self._test_header[0] == 2
+        assert list(self._test_header)[1] == 'DP1.NAUX'
         assert self._test_header[1] == 2
 
     def test_pattern_matching_keys(self):
@@ -2110,9 +2438,9 @@ class TestRecordValuedKeywordCards(FitsTestCase):
 
         del self._test_header['DP1.A*...']
         assert len(self._test_header) == 2
-        assert self._test_header.keys()[0] == 'DP1.NAXIS'
+        assert list(self._test_header)[0] == 'DP1.NAXIS'
         assert self._test_header[0] == 2
-        assert self._test_header.keys()[1] == 'DP1.NAUX'
+        assert list(self._test_header)[1] == 'DP1.NAUX'
         assert self._test_header[1] == 2
 
     def test_successive_pattern_matching(self):
@@ -2143,7 +2471,7 @@ class TestRecordValuedKeywordCards(FitsTestCase):
         """
 
         cl = self._test_header['DP1.AXIS.*']
-        assert cl.keys() == ['DP1.AXIS.1', 'DP1.AXIS.2']
+        assert list(cl) == ['DP1.AXIS.1', 'DP1.AXIS.2']
 
     def test_rvkc_in_cardlist_values(self):
         """
@@ -2152,7 +2480,7 @@ class TestRecordValuedKeywordCards(FitsTestCase):
         """
 
         cl = self._test_header['DP1.AXIS.*']
-        assert cl.values() == [1.0, 2.0]
+        assert list(cl.values()) == [1.0, 2.0]
 
     def test_rvkc_value_attribute(self):
         """
@@ -2225,3 +2553,22 @@ class TestRecordValuedKeywordCards(FitsTestCase):
         pytest.raises(KeyError, lambda: h['FOO.AXIS'])
         pytest.raises(KeyError, lambda: h['FOO.AXIS.'])
         pytest.raises(KeyError, lambda: h['FOO.'])
+
+    def test_fitsheader_script(self):
+        """
+        Checks the basic functionality of the fitsheader script
+        """
+        from ....io.fits.scripts import fitsheader
+        # Can an extension by specified by the EXTNAME keyword?
+        hf = fitsheader.HeaderFormatter(self.data('zerowidth.fits'))
+        assert "EXTNAME = 'AIPS FQ" in hf.parse('AIPS FQ')
+
+        # Can an extension by specified by the EXTNAME+EXTVER keywords?
+        hf = fitsheader.HeaderFormatter(self.data('test0.fits'))
+        assert "EXTNAME = 'SCI" in hf.parse('SCI,2')
+        # fitsheader should only print the compressed header when asked
+        hf = fitsheader.HeaderFormatter(self.data('comp.fits'))
+        assert "XTENSION= 'IMAGE" in hf.parse(1)  # decompressed
+        hf = fitsheader.HeaderFormatter(self.data('comp.fits'),
+                                        compressed=True)
+        assert "XTENSION= 'BINTABLE" in hf.parse(1)  # compressed

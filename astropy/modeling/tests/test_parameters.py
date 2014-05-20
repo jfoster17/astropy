@@ -3,24 +3,27 @@
 Tests models.parameters
 """
 
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
+
 import numpy as np
 from numpy.testing import utils
 
 from . import irafutil
 from .. import models, fitting
-from ..core import ParametricModel
+from ..core import Model, ModelDefinitionError
 from ..parameters import Parameter, InputParameterError
 from ...utils.data import get_pkg_data_filename
 from ...tests.helper import pytest
 
 
-class TestParModel(ParametricModel):
+class TestParModel(Model):
     """
     A toy model to test parameters machinery
     """
 
-    coeff = Parameter('coeff')
-    e = Parameter('e')
+    coeff = Parameter()
+    e = Parameter()
 
     def __init__(self, coeff, e, param_dim=1):
         super(TestParModel, self).__init__(
@@ -28,6 +31,98 @@ class TestParModel(ParametricModel):
 
     def __call__(self):
         pass
+
+
+def test_parameter_properties():
+    """Test if getting / setting of Parameter properties works."""
+
+    class MockModel(Model):
+        alpha = Parameter(name='alpha', default=42)
+
+        def __call__(self):
+            pass
+
+    m = MockModel()
+    p = m.alpha
+
+    assert p.name == 'alpha'
+
+    # Parameter names are immutable
+    with pytest.raises(AttributeError):
+        p.name = 'beta'
+
+    assert p.fixed == False
+    p.fixed = True
+    assert p.fixed == True
+
+    assert p.tied == False
+    p.tied = lambda _: 0
+
+    p.tied = False
+    assert p.tied == False
+
+    assert p.min == None
+    p.min = 42
+    assert p.min == 42
+    p.min = None
+    assert p.min == None
+
+    assert p.max == None
+    # TODO: shouldn't setting a max < min give an error?
+    p.max = 41
+    assert p.max == 41
+
+
+def test_parameter_operators():
+    """Test if the parameter arithmetic operators works,
+    i.e. whether parameters behave like numbers."""
+
+    class MockModel(Model):
+        alpha = Parameter(name='alpha', default=5)
+
+        def __call__(self):
+            pass
+
+    m = MockModel()
+    par = m.alpha
+    num = 5.
+    val = 3
+
+    assert par - val == num - val
+    assert val - par == val - num
+    assert par / val == num / val
+    assert val / par == val / num
+    assert par ** val == num ** val
+    assert val ** par == val ** num
+    assert par < 6
+    assert par > 3
+    assert par <= par
+    assert par >= par
+    assert par == par
+    assert -par == -num
+    assert abs(par) == abs(num)
+
+
+def test_parameter_name_attribute_mismatch():
+    """It should not be possible to define Parameters on a model with different
+    names from the attributes they are assigned to.
+    """
+
+    def make_bad_class():
+        class BadModel(Model):
+            foo = Parameter('bar')
+
+            def __call__(self): pass
+
+    def make_good_class():
+        class GoodModel(Model):
+            # This is redundant but okay
+            foo = Parameter('foo')
+
+            def __call__(self): pass
+
+    make_good_class()
+    pytest.raises(ModelDefinitionError, make_bad_class)
 
 
 class TestParameters(object):
@@ -142,7 +237,7 @@ class TestParameters(object):
         Uses an iraf example.
         """
         new_model = self.linear_fitter(self.model, self.x, self.y)
-        print self.y, self.x
+        print(self.y, self.x)
         utils.assert_allclose(new_model.parameters,
                               np.array(
                                   [4826.1066602783685, 952.8943813407858,
@@ -206,7 +301,7 @@ class TestMultipleParameterSets(object):
 
     def setup_class(self):
         self.x1 = np.arange(1, 10, .1)
-        self.x, self.y = np.mgrid[:10, :7]
+        self.y, self.x = np.mgrid[:10, :7]
         self.x11 = np.array([self.x1, self.x1]).T
         self.gmodel = models.Gaussian1D([12, 10], [3.5, 5.2], stddev=[.4, .7])
 

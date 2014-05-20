@@ -1,6 +1,100 @@
-WCSLIB version 4.19 (2013/09/30)
+WCSLIB version 4.23 (2014/05/11)
 --------------------------------
 
+* C library
+
+  - New function wcscompare() compares two wcsprm structs for equality
+    with varying degrees of strictness.  Test program twcscompare.
+    Contributed by Michael Droettboom.
+
+  - In wcssub(), fixed a bug uncovered by valgrind arising from
+    allocation of insufficient memory for temporaries when a new axis
+    is added.  Reported by Michael Droettboom.
+
+  - In wcshdo(), don't write RESTFRQ or RESTWAV if zero.
+
+    Also, to distinguish them from integer keyvalues, floating-
+    point values will now always be written with an exponent or
+    fractional part, ".0" being appended if necessary to achieve this.
+    Suggested by Peter Weilbacher.
+
+  - Fixed the '-h' option in twcshdr.
+
+* Fortran wrappers
+
+  - Wrapper for wcscompare().
+
+
+WCSLIB version 4.22 (2014/04/13)
+--------------------------------
+
+* C library
+
+  - In pcox2s() and pcos2x(), use alternative projection equations for
+    greater numerical precision near theta == 0.  In cops2x(), return
+    an exact result for theta at the poles.  Relaxed the tolerance for
+    bounds checking a little in sflx2s().
+
+
+WCSLIB version 4.21 (2014/03/24)
+--------------------------------
+
+* C library
+
+  - New function prjbchk() performs bounds checking on native spherical
+    coordinates.  It is invoked automatically by the deprojection (x2s)
+    routines if prjprm::bounds&4 is set.  Documented the new bounds
+    checking implemented by prjbchk() in the prologue entry for
+    wcsbchk().  Improvements to tprj1 to test the vector API of prjx2s()
+    and to deal better with out-of-bounds native coordinates returned by
+    it.
+
+  - Bug fixes in the projection routines: in hpxx2s() relating to bounds
+    checking, bug introduced at 4.20, reported by Michael Droettboom; in
+    parx2s() and molx2s() relating to setting the stat vector; in
+    hpxx2s() relating to implementation of the vector API; and in
+    xphx2s() relating to setting an out-of-bounds value of phi.
+
+* Fortran wrappers
+
+  - Wrapper for prjbchk().  Modified tprj1.f to track changes to the C
+    version.
+
+
+WCSLIB version 4.20 (2013/12/18)
+--------------------------------
+
+* C library
+
+  - New function, wcsbchk(), for controlling bounds checking in the
+    projection routines.
+
+  - Enable bounds checking in the pixel-to-sky (x2s) direction for HPX
+    and XPH if prjprm::bounds&2.  Tightened bounds checking in xphx2s().
+    prjini() now sets prjprm::bounds = 3 to enable all bounds checking
+    by default.
+
+  - Fixed an incorrect error message in wcs_units().  Also report
+    potentially unsafe units translations in unitfix() - both
+    contributed by Michael Droettboom.
+
+* Fortran wrappers
+
+  - Wrapper for wcsbchk().
+
+* PGSBOX
+
+  - Fixed a few nuisance warnings from gfortran 4.7.2 relating to
+    implicit type conversions in pgsbox.f.
+
+* User manual
+
+  - Added mention of wcsjs (Javascript) in the section on other
+    packages.
+
+
+WCSLIB version 4.19 (2013/09/30)
+--------------------------------
 
 * C library
 
@@ -30,8 +124,8 @@ WCSLIB version 4.18 (2013/07/13)
 
 * Fortran wrappers
 
-  - Wrappers for XPH and corresponding modifications to the test
-    programs.
+  - Wrappers for the XPH projection functions and corresponding
+    modifications to the test programs.
 
   - Fixed a few inconsequential warnings from gfortran 4.7.2 relating
     to implicit type conversions in the test programs.
@@ -2042,4 +2136,4 @@ WCSLIB version 1.0 (1995/01/31)
   Initial release.
 
 ------------------------------------------------------------------------
-$Id: CHANGES,v 4.19 2013/09/29 14:17:53 mcalabre Exp $
+$Id: CHANGES,v 4.23 2014/05/11 04:09:39 mcalabre Exp $

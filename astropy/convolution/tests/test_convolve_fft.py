@@ -1,4 +1,6 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
 
 import itertools
 
@@ -20,11 +22,11 @@ BOUNDARY_OPTIONS = [None, 'fill', 'wrap']
 What does convolution mean?  We use the 'same size' assumption here (i.e.,
 you expect an array of the exact same size as the one you put in)
 Convolving any array with a kernel that is [1] should result in the same array returned
-Working example array: [1,2,3,4,5]
-Convolved with [1] = [1,2,3,4,5]
-Convolved with [1,1] = [1, 3, 5, 7, 9] THIS IS NOT CONSISTENT!
-Convolved with [1,0] = [1, 2, 3, 4, 5]
-Convolved with [0,1] = [0, 1, 2, 3, 4]
+Working example array: [1, 2, 3, 4, 5]
+Convolved with [1] = [1, 2, 3, 4, 5]
+Convolved with [1, 1] = [1, 3, 5, 7, 9] THIS IS NOT CONSISTENT!
+Convolved with [1, 0] = [1, 2, 3, 4, 5]
+Convolved with [0, 1] = [0, 1, 2, 3, 4]
 """
 
 # NOTE: use_numpy_fft is redundant if you don't have FFTW installed
@@ -114,7 +116,6 @@ class TestConvolve1D(object):
             # average = average_zeros; sum = sum_zeros
             answer_key += '_zeros'
 
-        print answer_key
         assert_array_almost_equal_nulp(z, answer_dict[answer_key], 10)
 
     @pytest.mark.parametrize(option_names, options)
@@ -140,7 +141,7 @@ class TestConvolve1D(object):
         if hasattr(np, 'float16'):
             assert_array_almost_equal_nulp(
                 np.asarray(z, dtype=np.float16),
-                np.array([1.,0.,3.], dtype=np.float16), 10)
+                np.array([1., 0., 3.], dtype=np.float16), 10)
         # ASSERT equality to better than 16 bit but worse than 32 bit precision
         assert np.all(np.abs(z - np.array([1., 0., 3.])) < 1e-14)
 
@@ -177,7 +178,7 @@ class TestConvolve1D(object):
         # the comparison fails unless you cast the float64 to a float16
         if hasattr(np, 'float16'):
             assert_array_almost_equal_nulp(np.asarray(z, dtype=np.float16),
-                                           np.array([1.,0.,3.], dtype=np.float16), 10)
+                                           np.array([1., 0., 3.], dtype=np.float16), 10)
         assert np.all(np.abs(z - outval) < 1e-14)
 
     @pytest.mark.parametrize(option_names, options)
@@ -231,7 +232,6 @@ class TestConvolve1D(object):
         if not interpolate_nan:
             answer_key += '_noignan'
 
-        print boundary, interpolate_nan, normalize_kernel, ignore_edge_zeros, answer_key
         assert_array_almost_equal_nulp(z, answer_dict[answer_key], 10)
 
     def test_masked_array(self):
@@ -306,7 +306,7 @@ class TestConvolve2D(object):
                          ignore_edge_zeros=ignore_edge_zeros)
 
         assert_array_almost_equal_nulp(z, x, 10)
-        # assert np.all( np.abs(z-x) < np.spacing(np.where(z>x,z,x))*2 )
+        # assert np.all( np.abs(z-x) < np.spacing(np.where(z>x, z, x))*2 )
 
     @pytest.mark.parametrize(option_names, options)
     def test_uniform_3x3(self, boundary, interpolate_nan, normalize_kernel,
@@ -356,11 +356,7 @@ class TestConvolve2D(object):
             answer_key += '_withzeros'
 
         a = answer_dict[answer_key]
-        print boundary, interpolate_nan, normalize_kernel, ignore_edge_zeros, answer_key
-        print "z: ", z
-        print "answer: ", a
-        print "ratio: ", z / a
-        # for reasons unknown, the Windows FFT returns an answer for the [0,0]
+        # for reasons unknown, the Windows FFT returns an answer for the [0, 0]
         # component that is EXACTLY 10*np.spacing
         assert np.all(np.abs(z - a) <= np.spacing(np.where(z > a, z, a)) * 10)
 
@@ -459,10 +455,17 @@ class TestConvolve2D(object):
             answer_key += '_ignan'
 
         a = answer_dict[answer_key]
-        print boundary, interpolate_nan, normalize_kernel, ignore_edge_zeros, answer_key
-        print "z: ", z
-        print "answer: ", a
-        print "ratio: ", z / a
-        # for reasons unknown, the Windows FFT returns an answer for the [0,0]
+        # for reasons unknown, the Windows FFT returns an answer for the [0, 0]
         # component that is EXACTLY 10*np.spacing
         assert np.all(np.abs(z - a) <= np.spacing(np.where(z > a, z, a)) * 10)
+
+    def test_big_fail(self):
+        """ Test that convolve_fft raises an exception if a too-large array is passed in """
+
+        with pytest.raises(ValueError) as ex:
+            # while a good idea, this approach did not work; it actually writes to disk
+            #arr = np.memmap('file.np', mode='w+', shape=(512, 512, 512), dtype=np.complex)
+            # this just allocates the memory but never touches it; it's better:
+            arr = np.empty([512, 512, 512], dtype=np.complex)
+            # note 512**3 * 16 bytes = 2.0 GB
+            convolve_fft(arr, arr)

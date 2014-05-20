@@ -5,9 +5,9 @@ Tests for model evaluation.
 Compare the results of some models with other programs.
 """
 
-from __future__ import division
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
 
-import copy_reg
 import types
 
 try:
@@ -21,11 +21,13 @@ from numpy.testing import utils
 
 from .example_models import models_1D, models_2D
 from .. import fitting, models
-from .. import fitting
 from ..core import (LabeledInput, SerialCompositeModel, SummedCompositeModel,
-                    Parametric1DModel, Parametric2DModel)
+                    Fittable1DModel, Fittable2DModel)
 from ..polynomial import PolynomialModel
 from ...tests.helper import pytest
+
+from ...extern import six
+from ...extern.six.moves import copyreg as copy_reg
 
 try:
     from scipy import optimize  # pylint: disable=W0611
@@ -39,7 +41,7 @@ class TestSerialComposite(object):
     Test composite models evaluation in series
     """
     def setup_class(self):
-        self.x, self.y = np.mgrid[:5, :5]
+        self.y, self.x = np.mgrid[:5, :5]
         self.p1 = models.Polynomial1D(3)
         self.p11 = models.Polynomial1D(3)
         self.p2 = models.Polynomial2D(3)
@@ -62,7 +64,7 @@ class TestSerialComposite(object):
 
     def test_labeledinput_2(self):
         labeled_input = LabeledInput([self.x, self.y], ['x', 'y'])
-        rot = models.MatrixRotation2D(angle=23.4)
+        rot = models.Rotation2D(angle=23.4)
         offx = models.Shift(-2)
         offy = models.Shift(1.2)
         model = SerialCompositeModel([rot, offx, offy],
@@ -77,7 +79,7 @@ class TestSerialComposite(object):
 
     def test_labeledinput_3(self):
         labeled_input = LabeledInput([2, 4.5], ['x', 'y'])
-        rot = models.MatrixRotation2D(angle=23.4)
+        rot = models.Rotation2D(angle=23.4)
         offx = models.Shift(-2)
         offy = models.Shift(1.2)
         model = SerialCompositeModel([rot, offx, offy],
@@ -91,7 +93,7 @@ class TestSerialComposite(object):
         utils.assert_almost_equal(y, result.y)
 
     def test_multiple_input(self):
-        rot = models.MatrixRotation2D(angle=-60)
+        rot = models.Rotation2D(angle=-60)
         model = SerialCompositeModel([rot, rot])
         xx, yy = model(self.x, self.y)
         inverse_model = model.inverse()
@@ -134,7 +136,7 @@ class TestSummedComposite(object):
     def test_inputs_outputs_mismatch(self):
         p2 = models.Polynomial2D(1)
         ch2 = models.Chebyshev2D(1, 1)
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             SummedCompositeModel([p2, ch2])
 
 
@@ -173,19 +175,19 @@ def test_custom_model(amplitude=4, frequency=1):
         df = 2 * np.pi * x * amplitude * np.cos(2 * np.pi * frequency * x)
         return np.vstack((da, df))
 
-    SineModel = models.custom_model_1d(sine_model, func_deriv=sine_deriv)
+    SineModel = models.custom_model_1d(sine_model, func_fit_deriv=sine_deriv)
 
     x = np.linspace(0, 4, 50)
     sin_model = SineModel()
 
     y = sin_model.eval(x, 5., 2.)
-    y_prime = sin_model.deriv(x, 5., 2.)
+    y_prime = sin_model.fit_deriv(x, 5., 2.)
 
     np.random.seed(0)
     data = sin_model(x) + np.random.rand(len(x)) - 0.5
     fitter = fitting.NonLinearLSQFitter()
     model = fitter(sin_model, x, data)
-    fitparams, _ = model._model_to_fit_params()
+    fitparams, _ = fitter._model_to_fit_params(model)
     assert np.all((fitparams - np.array([amplitude, frequency])) < 0.001)
 
 
@@ -218,7 +220,7 @@ def test_custom_model_defaults():
     assert sin_model.frequency == 1
 
 
-class TestParametricModels(object):
+class TestFittableModels(object):
     """
     Test class for all parametric models.
 
@@ -237,7 +239,7 @@ class TestParametricModels(object):
         self.y = 6.7
         self.x1 = np.arange(1, 10, .1)
         self.y1 = np.arange(1, 10, .1)
-        self.x2, self.y2 = np.mgrid[:10, :8]
+        self.y2, self.x2 = np.mgrid[:10, :8]
 
     @pytest.mark.parametrize(('model_class'), models_1D.keys())
     def test_input1D(self, model_class):
@@ -270,14 +272,16 @@ class TestParametricModels(object):
         x_lim = models_1D[model_class]['x_lim']
         parameters = models_1D[model_class]['parameters']
         model = create_model(model_class, parameters)
+
         if isinstance(parameters, dict):
-            parameters.pop('degree')
-            parameters = parameters.values()
+            parameters = [parameters[name] for name in model.param_names]
+
         if "log_fit" in models_1D[model_class]:
             if models_1D[model_class]['log_fit']:
                 x = np.logspace(x_lim[0], x_lim[1], self.N)
         else:
             x = np.linspace(x_lim[0], x_lim[1], self.N)
+
         np.random.seed(0)
         # add 10% noise to the amplitude
         relative_noise_amplitude = 0.01
@@ -291,7 +295,7 @@ class TestParametricModels(object):
         fitted_parameters = [val
                              for (val, fixed) in zip(parameters, fixed)
                              if not fixed]
-        fitparams, _ = new_model._model_to_fit_params()
+        fitparams, _ = fitter._model_to_fit_params(new_model)
         utils.assert_allclose(fitparams, fitted_parameters,
                               atol=self.fit_error)
 
@@ -329,9 +333,9 @@ class TestParametricModels(object):
 
         parameters = models_2D[model_class]['parameters']
         model = create_model(model_class, parameters)
+
         if isinstance(parameters, dict):
-            parameters.pop('degree')
-            parameters = parameters.values()
+            parameters = [parameters[name] for name in model.param_names]
 
         if "log_fit" in models_2D[model_class]:
             if models_2D[model_class]['log_fit']:
@@ -347,7 +351,7 @@ class TestParametricModels(object):
         data = model(xv, yv) + 0.1 * parameters[0] * (np.random.rand(self.N, self.N) - 0.5)
         fitter = fitting.NonLinearLSQFitter()
         new_model = fitter(model, xv, yv, data)
-        fitparams, _ = new_model._model_to_fit_params()
+        fitparams, _ = fitter._model_to_fit_params(new_model)
         utils.assert_allclose(fitparams, parameters, atol=self.fit_error)
 
     @pytest.mark.skipif('not HAS_SCIPY')
@@ -360,7 +364,7 @@ class TestParametricModels(object):
         x_lim = models_2D[model_class]['x_lim']
         y_lim = models_2D[model_class]['y_lim']
 
-        if model_class.deriv is None:
+        if model_class.fit_deriv is None:
             pytest.skip("Derivative function is not defined for model.")
         if issubclass(model_class, (models.PolynomialModel, models.OrthoPolynomialBase)):
             pytest.skip("Skip testing derivative of polynomials.")
@@ -403,7 +407,7 @@ class TestParametricModels(object):
         """
         x_lim = models_1D[model_class]['x_lim']
 
-        if model_class.deriv is None:
+        if model_class.fit_deriv is None:
             pytest.skip("Derivative function is not defined for model.")
         if issubclass(model_class, (models.PolynomialModel, models.OrthoPolynomialBase)):
             pytest.skip("Skip testing derivative of polynomials.")
@@ -434,7 +438,7 @@ def create_model(model_class, parameters, use_constraints=True):
     Create instance of model class.
     """
     constraints = {}
-    if issubclass(model_class, Parametric1DModel):
+    if issubclass(model_class, Fittable1DModel):
         if "requires_scipy" in models_1D[model_class] and not HAS_SCIPY:
             pytest.skip("SciPy not found")
         if use_constraints:
@@ -442,7 +446,7 @@ def create_model(model_class, parameters, use_constraints=True):
                 constraints = models_1D[model_class]['constraints']
         return model_class(*parameters, **constraints)
 
-    elif issubclass(model_class, Parametric2DModel):
+    elif issubclass(model_class, Fittable2DModel):
         if "requires_scipy" in models_2D[model_class] and not HAS_SCIPY:
             pytest.skip("SciPy not found")
         if use_constraints:
@@ -476,3 +480,11 @@ def test_ScaleModel():
     m = models.Scale([42, 43])
     utils.assert_equal(m(0), [0, 0])
     utils.assert_equal(m([1, 2]), [[ 42,  43], [ 84,  86]])
+
+
+def test_parametric_model_repr():
+    """Some unit tests that cover lines in core.py that are untested at the
+    moment"""
+
+    m = models.Gaussian1D(1, 2, 3)
+    assert repr(m) == '<Gaussian1D(amplitude=1.0, mean=2.0, stddev=3.0)>'

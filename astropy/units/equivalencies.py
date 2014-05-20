@@ -1,20 +1,23 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-
-"""
-A set of standard astronomical equivalencies.
-"""
-
+"""A set of standard astronomical equivalencies."""
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 
+# THIRD-PARTY
+import numpy as np
+
+# LOCAL
 from ..constants import si as _si
 from . import si
 from . import cgs
 from . import astrophys
+from . import dimensionless_unscaled
+
 
 __all__ = ['parallax', 'spectral', 'spectral_density', 'doppler_radio',
            'doppler_optical', 'doppler_relativistic', 'mass_energy',
-           'brightness_temperature', 'dimensionless_angles']
+           'brightness_temperature', 'dimensionless_angles',
+           'logarithmic', 'temperature']
 
 
 def dimensionless_angles():
@@ -25,6 +28,14 @@ def dimensionless_angles():
     and indepedent of whether it is part of a more complicated unit.
     """
     return [(si.radian, None)]
+
+
+def logarithmic():
+    """Allow logarithmic units to be converted to dimensionless fractions"""
+    return [
+        (dimensionless_unscaled, astrophys.dex,
+         lambda x: np.log10(x), lambda x: 10.**x)
+    ]
 
 
 def parallax():
@@ -45,16 +56,30 @@ def spectral():
     Allows conversions between wavelength units, wave number units,
     frequency units, and energy units as they relate to light.
 
+    There are two types of wave number:
+
+        * spectroscopic - :math:`1 / \\lambda` (per meter)
+        * angular - :math:`2 \\pi / \\lambda` (radian per meter)
+
     """
     hc = _si.h.value * _si.c.value
-    inv_m = si.m ** -1
+    two_pi = 2.0 * np.pi
+    inv_m_spec = si.m ** -1
+    inv_m_ang = si.radian / si.m
+
     return [
         (si.m, si.Hz, lambda x: _si.c.value / x),
         (si.m, si.J, lambda x: hc / x),
-        (si.m, inv_m, lambda x: 1.0 / x),
         (si.Hz, si.J, lambda x: _si.h.value * x, lambda x: x / _si.h.value),
-        (si.Hz, inv_m, lambda x: x / _si.c.value, lambda x: _si.c.value * x),
-        (si.J, inv_m, lambda x: x / hc, lambda x: hc * x)
+        (si.m, inv_m_spec, lambda x: 1.0 / x),
+        (si.Hz, inv_m_spec, lambda x: x / _si.c.value,
+         lambda x: _si.c.value * x),
+        (si.J, inv_m_spec, lambda x: x / hc, lambda x: hc * x),
+        (inv_m_spec, inv_m_ang, lambda x: x * two_pi, lambda x: x / two_pi),
+        (si.m, inv_m_ang, lambda x: two_pi / x),
+        (si.Hz, inv_m_ang, lambda x: two_pi * x / _si.c.value,
+         lambda x: _si.c.value * x / two_pi),
+        (si.J, inv_m_ang, lambda x: x * two_pi / hc, lambda x: hc * x / two_pi)
     ]
 
 
@@ -65,8 +90,8 @@ def spectral_density(wav, factor=None):
 
     Parameters
     ----------
-    wav : Quantity
-        Quantity associated with values being converted
+    wav : `~astropy.units.Quantity`
+        `~astropy.units.Quantity` associated with values being converted
         (e.g., wavelength or frequency).
 
     Notes
@@ -81,7 +106,7 @@ def spectral_density(wav, factor=None):
     if isinstance(wav, UnitBase):
         if factor is None:
             raise ValueError(
-                'If ``wav`` is specified as a unit, ``factor`` should be set')
+                'If `wav` is specified as a unit, `factor` should be set')
         wav = factor * wav   # Convert to Quantity
 
     c_Aps = _si.c.to(si.AA / si.s).value  # Angstrom/s
@@ -166,7 +191,7 @@ def doppler_radio(rest):
 
     Parameters
     ----------
-    rest : Quantity
+    rest : `~astropy.units.Quantity`
         Any quantity supported by the standard spectral equivalencies
         (wavelength, energy, frequency, wave number).
 
@@ -231,7 +256,7 @@ def doppler_optical(rest):
 
     Parameters
     ----------
-    rest : Quantity
+    rest : `~astropy.units.Quantity`
         Any quantity supported by the standard spectral equivalencies
         (wavelength, energy, frequency, wave number).
 
@@ -297,7 +322,7 @@ def doppler_relativistic(rest):
 
     Parameters
     ----------
-    rest : Quantity
+    rest : `~astropy.units.Quantity`
         Any quantity supported by the standard spectral equivalencies
         (wavelength, energy, frequency, wave number).
 
@@ -380,30 +405,29 @@ def mass_energy():
 
 def brightness_temperature(beam_area, disp):
     """
-    "Antenna Gain" or "sensitivity" equivalency: Defines the conversion between
-    Jy/beam and "brightness temperature", :math:`T_B`, in Kelvins.  This is a
-    unit very commonly used in radio astronomy.  Typically, the gain refers to
-    the conversion between corrected antenna temperature :math:`T_A^*` and flux
-    density.  See, e.g., "Tools of Radio Astronomy" (Wilson 2009) eqn 8.16 and
-    eqn 8.19 (these pages are available on `google books
+    Defines the conversion between Jy/beam and "brightness temperature",
+    :math:`T_B`, in Kelvins.  The brightness temperature is a unit very
+    commonly used in radio astronomy.  See, e.g., "Tools of Radio Astronomy"
+    (Wilson 2009) eqn 8.16 and eqn 8.19 (these pages are available on `google
+    books
     <http://books.google.com/books?id=9KHw6R8rQEMC&pg=PA179&source=gbs_toc_r&cad=4#v=onepage&q&f=false>`__).
 
     :math:`T_B \equiv S_\\nu / \left(2 k \\nu^2 / c^2 \\right)`
 
-    However, the beam area is essential for this computation: the brighntess
+    However, the beam area is essential for this computation: the brightness
     temperature is inversely proportional to the beam area
 
     Parameters
     ----------
     beam_area : Beam Area equivalent
         Beam area in angular units, i.e. steradian equivalent
-    disp : `Quantity` with spectral units
-        The observed `spectral` equivalent `Unit` (e.g., frequency or
-        wavelength)
+    disp : `~astropy.units.Quantity` with spectral units
+        The observed `spectral` equivalent `~astropy.units.Unit` (e.g.,
+        frequency or wavelength)
 
     Examples
     --------
-    Arecibo C-band beam gain ~ 7 K/Jy::
+    Arecibo C-band beam::
 
         >>> import numpy as np
         >>> from astropy import units as u
@@ -433,3 +457,15 @@ def brightness_temperature(beam_area, disp):
         return (x_K * beam / factor)
 
     return [(astrophys.Jy, si.K, convert_Jy_to_K, convert_K_to_Jy)]
+
+
+def temperature():
+    """Convert between Kelvin, Celsius, and Fahrenheit here because
+    Unit and CompositeUnit cannot do addition or subtraction properly.
+    """
+    from .imperial import deg_F
+    return [
+        (si.K, si.deg_C, lambda x: x - 273.15, lambda x: x + 273.15),
+        (si.deg_C, deg_F, lambda x: x * 1.8 + 32.0, lambda x: (x - 32.0) / 1.8),
+        (si.K, deg_F, lambda x: (x - 273.15) * 1.8 + 32.0,
+         lambda x: ((x - 32.0) / 1.8) + 273.15)]

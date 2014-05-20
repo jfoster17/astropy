@@ -53,11 +53,11 @@ class VOUnit(generic.Generic):
                 names[key] = getattr(u, key)
 
         simple_units = [
-            'min', 'h', 'd', 'a', 'yr', 'deg', 'arcsec', 'arcmin', 'deg',
+            'min', 'h', 'd', 'a', 'yr', 'arcsec', 'arcmin', 'deg',
             'mas', 'AU', 'pc', 'u', 'eV', 'Jy']
 
         deprecated_units = [
-            'angstrom', 'Angstrom', 'barn', 'erg', 'G', 'mag', 'solMass',
+            'angstrom', 'Angstrom', 'barn', 'erg', 'G', 'mag', 'dB', 'solMass',
             'solLum', 'solRad', 'lyr', 'ct', 'count', 'photon', 'ph', 'R',
             'pix', 'pixel', 'D', 'Sun', 'chan', 'bin', 'voxel', 'bit', 'byte',
             'adu', 'beam']
@@ -128,13 +128,16 @@ class VOUnit(generic.Generic):
             s = ''
             if unit.scale != 1:
                 m, ex = utils.split_mantissa_exponent(unit.scale)
+                parts = []
                 if m:
-                    s += m + ' '
+                    parts.append(m)
                 if ex:
-                    s += ' 10'
+                    fex = '10'
                     if not ex.startswith('-'):
-                        s += '+'
-                    s += ex
+                        fex += '+'
+                    fex += ex
+                    parts.append(fex)
+                s += ' '.join(parts)
 
             pairs = list(zip(unit.bases, unit.powers))
             pairs.sort(key=lambda x: x[1], reverse=True)

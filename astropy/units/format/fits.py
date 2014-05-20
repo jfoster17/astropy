@@ -17,6 +17,11 @@ from . import generic
 from . import utils
 from ...utils.misc import did_you_mean
 
+class UnitScaleError(ValueError):
+    """
+    Used to catch the errors involving scaled units, 
+    which are not recognized by FITS format.
+    """
 
 class Fits(generic.Generic):
     """
@@ -52,12 +57,17 @@ class Fits(generic.Generic):
             'y', 'z', 'a', 'f', 'p', 'n', 'u', 'm', 'c', 'd',
             '', 'da', 'h', 'k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y']
 
+        special_cases = {'dbyte': u.Unit(0.1*u.byte)}
+
         for base in bases + deprecated_bases:
             for prefix in prefixes:
                 key = prefix + base
                 if keyword.iskeyword(key):
                     continue
-                names[key] = getattr(u, key)
+                elif key in special_cases:
+                    names[key] = special_cases[key]
+                else:
+                    names[key] = getattr(u, key)
         for base in deprecated_bases:
             for prefix in prefixes:
                 deprecated_names.add(prefix + base)
@@ -119,7 +129,7 @@ class Fits(generic.Generic):
 
         if isinstance(unit, core.CompositeUnit):
             if unit.scale != 1:
-                raise ValueError(
+                raise UnitScaleError(
                     "The FITS unit format is not able to represent scale. "
                     "Multiply your data by {0:e}.".format(unit.scale))
 

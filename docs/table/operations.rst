@@ -1,5 +1,5 @@
 .. include:: references.txt
-.. |join| replace:: :func:`~astropy.table.operations.join`
+.. |join| replace:: :func:`~astropy.table.join`
 
 .. _table_operations:
 
@@ -20,16 +20,16 @@ table from one or more input tables.  This includes:
      - Function
    * - `Grouped operations`_
      - Group tables and columns by keys
-     - `~astropy.table.table.Table.group_by`
+     - `~astropy.table.Table.group_by`
    * - `Stack vertically`_
      - Concatenate input tables along rows
-     - `~astropy.table.operations.vstack`
+     - `~astropy.table.vstack`
    * - `Stack horizontally`_
      - Concatenate input tables along columns
-     - `~astropy.table.operations.hstack`
+     - `~astropy.table.hstack`
    * - `Join`_
      - Database-style join of two tables
-     - `~astropy.table.operations.join`
+     - `~astropy.table.join`
 
 
 .. _grouped-operations:
@@ -59,7 +59,7 @@ Table groups
 ~~~~~~~~~~~~~~
 
 Now suppose we want the mean magnitudes for each object.  We first group the data by the
-``name`` column with the :func:`~astropy.table.table.Table.group_by` method.  This returns
+``name`` column with the :func:`~astropy.table.Table.group_by` method.  This returns
 a new table sorted by ``name`` which has a ``groups`` property specifying the unique
 values of ``name`` and the corresponding table rows::
 
@@ -92,12 +92,12 @@ It defines how the table is grouped via an array of the unique row key values an
 indices of the group boundaries for those key values.  The groups here correspond to the
 row slices ``0:4``, ``4:7``, and ``7:10`` in the ``obs_by_name`` table.
 
-The initial argument (``keys``) for the `~astropy.table.table.Table.group_by` function
+The initial argument (``keys``) for the `~astropy.table.Table.group_by` function
 can take a number of input data types:
 
 - Single string value with a table column name (as shown above)
 - List of string values with table column names
-- Another `Table` or `Table` column with same length as table
+- Another |Table| or |Column| with same length as table
 - Numpy structured array with same length as table
 - Numpy homogeneous array with same length as table
 
@@ -157,7 +157,7 @@ To get the first and second groups together use a slice::
 You can also supply a numpy array of indices or a boolean mask to select particular
 groups, e.g.::
 
-  >>> mask = obs_by_name.groups.keys == 'M101'
+  >>> mask = obs_by_name.groups.keys['name'] == 'M101'
   >>> print obs_by_name.groups[mask]
   name  obs_date  mag_b mag_v
   ---- ---------- ----- -----
@@ -197,13 +197,14 @@ One can iterate over the group sub-tables and corresponding keys with::
 Column Groups
 ~~~~~~~~~~~~~~
 
-Like `Table` objects, `Column` objects can also be grouped for subsequent
+Like |Table| objects, |Column| objects can also be grouped for subsequent
 manipulation with grouped operations.  This can apply both to columns within a
-`Table` or bare `Column` objects.
+|Table| or bare |Column| objects.
 
-As for `Table`, the grouping is generated with the `group_by()` method.  The
-difference here is that there is no option of providing one or more column
-names since that doesn't make sense for a `Column`.
+As for |Table|, the grouping is generated with the
+`~astropy.table.Table.group_by` method.  The difference here is that
+there is no option of providing one or more column names since that
+doesn't make sense for a |Column|.
 
 Examples::
 
@@ -259,7 +260,7 @@ the `~astropy.table.groups.TableGroups.aggregate` method::
 It seems the magnitude values were successfully averaged, but what
 about the WARNING?  Since the ``obs_date`` column is a string-type
 array, the `numpy.mean` function failed and raised an exception.
-Any time this happens then ``~astropy.table.groups.TableGroups.aggregate`
+Any time this happens then `~astropy.table.groups.TableGroups.aggregate`
 will issue a warning and then
 drop that column from the output result.  Note that the ``name``
 column is one of the ``keys`` used to determine the grouping so
@@ -304,7 +305,7 @@ Table groups can be filtered by means of the
 supplying a function which is called for each group.  The function
 which is passed to this method must accept two arguments:
 
-- ``table`` : `Table` object
+- ``table`` : |Table| object
 - ``key_colnames`` : list of columns in ``table`` used as keys for grouping
 
 It must then return either `True` or `False`.  As an example, the following
@@ -363,7 +364,7 @@ Stack vertically
 ^^^^^^^^^^^^^^^^^^^^
 
 The |Table| class supports stacking tables vertically with the
-`~astropy.table.operations.vstack` function.  This process is also commonly known as
+`~astropy.table.vstack` function.  This process is also commonly known as
 concatenating or appending tables in the row direction.  It corresponds roughly
 to the `numpy.vstack` function.
 
@@ -416,7 +417,7 @@ table those values are marked as missing.  This is the default behavior and corr
 
 In the case of ``join_type='inner'``, only the common columns (the intersection) are
 present in the output table.  When ``join_type='exact'`` is specified then
-`~astropy.table.operations.vstack` requires that all the input tables
+`~astropy.table.vstack` requires that all the input tables
 have exactly the same column names.
 
 More than two tables can be stacked by supplying a list of table objects::
@@ -445,7 +446,7 @@ Stack horizontally
 ^^^^^^^^^^^^^^^^^^^^^
 
 The |Table| class supports stacking tables horizontally (in the column-wise direction) with the
-`~astropy.table.operations.hstack` function.    It corresponds roughly
+`~astropy.table.hstack` function.    It corresponds roughly
 to the `numpy.hstack` function.
 
 For example, suppose one has the following two tables::
@@ -468,7 +469,7 @@ Now we can stack these two tables horizontally::
     2 bar 2.1 spam toast
     3 baz 2.8   --    --
 
-As with `~astropy.table.operations.vstack`, there is an optional ``join_type`` argument
+As with `~astropy.table.vstack`, there is an optional ``join_type`` argument
 that can take values ``'inner'``, ``'exact'``, and ``'outer'``.  The default is
 ``'outer'``, which effectively takes the union of available rows and masks out any missing
 values.  This is illustrated in the example above.  The other options give the
@@ -623,6 +624,8 @@ product <http://en.wikipedia.org/wiki/Cartesian_product>`_.  For each matching k
 combination of the left and right tables is represented.  When there is no match in either
 the left or right table, the corresponding column values are designated as missing.
 
+.. doctest-skip:: win32
+
   >>> print join(left, right, join_type='outer')
   key  L   R
   --- --- ---
@@ -642,7 +645,9 @@ the left or right table, the corresponding column values are designated as missi
    can vary.
 
 An inner join is the same but only returns rows where there is a key match in both the
-left and right tables::
+left and right tables:
+
+.. doctest-skip:: win32
 
   >>> print join(left, right, join_type='inner')
   key  L   R
@@ -716,9 +721,9 @@ recursive algorithm with four rules:
 
 By default, a warning is emitted in the last case (both metadata values are not
 `None`). The warning can be silenced or made into an exception using the
-``metadata_conflicts`` argument to :func:`~astropy.table.operations.hstack`,
-:func:`~astropy.table.operations.vstack`, or
-:func:`~astropy.table.operations.join`. The ``metadata_conflicts`` option can be set to:
+``metadata_conflicts`` argument to :func:`~astropy.table.hstack`,
+:func:`~astropy.table.vstack`, or
+:func:`~astropy.table.join`. The ``metadata_conflicts`` option can be set to:
 
 - ``'silent'`` - no warning is emitted, the value for the last table is silently picked
 - ``'warn'`` - a warning is emitted, the value for the last table is picked

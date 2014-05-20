@@ -20,29 +20,34 @@ from ..utils.console import color_print
 from ..utils.exceptions import AstropyDeprecationWarning
 from ..utils.metadata import MetaData
 from . import groups
-from .pprint import (_pformat_col, _pformat_col_iter, _more_tabcol)
+from . import pprint
 from .np_utils import fix_column_name
 
-from ..config import ConfigurationItem
+from ..config import ConfigAlias
 
 NUMPY_VERSION = version.LooseVersion(np.__version__)
 
-AUTO_COLNAME = ConfigurationItem(
-    'auto_colname', 'col{0}',
-    'The template that determines the name of a column if it cannot be '
-    'determined. Uses new-style (format method) string formatting')
+AUTO_COLNAME = ConfigAlias(
+    '0.4', 'AUTO_COLNAME', 'auto_colname',
+    'astropy.table.column', 'astropy.table')
 
 ERROR_COLUMN_ARGS_MESSAGE = """
-The first argument to {class_name} is the string {first_arg}, which was probably intended
-as the column name.  Starting in Astropy 0.3 the argument order for initializing
-a {class_name} object is {class_name}(data=None, name=None, ...)."""
+The first argument to {class_name} is the string {first_arg}, which was
+probably intended as the column name.  Starting in Astropy 0.3 the argument
+order for initializing a {class_name} object is {class_name}(data=None,
+name=None, ...)."""
+
+# Create a generic TableFormatter object for use by bare columns with no
+# parent table.
+FORMATTER = pprint.TableFormatter()
 
 
 def _check_column_new_args(func):
     """
-    Decorator for transition from 0.2 arg order (name, data, ..) to 0.3 order (data,
-    name, ...).  Check if user provided a string as the first arg (note that a string
-    cannot be valid as ``data``).  Raise an error with a useful message.
+    Decorator for transition from 0.2 arg order (name, data, ..) to 0.3
+    order (data, name, ...).  Check if user provided a string as the first
+    arg (note that a string cannot be valid as ``data``).  Raise an error
+    with a useful message.
     """
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -55,7 +60,8 @@ def _check_column_new_args(func):
 
 
 def _auto_names(n_cols):
-    return [AUTO_COLNAME().format(i) for i in range(n_cols)]
+    from . import conf
+    return [str(conf.auto_colname).format(i) for i in range(n_cols)]
 
 
 def _column_compare(op):
@@ -104,9 +110,10 @@ class BaseColumn(np.ndarray):
             dtype = (np.dtype(dtype).str, shape)
             self_data = np.zeros(length, dtype=dtype)
         elif isinstance(data, BaseColumn) and hasattr(data, '_name'):
-            # When unpickling a MaskedColumn, ``data`` will be a bare BaseColumn with none
-            # of the expected attributes.  In this case do NOT execute this block which
-            # initializes from ``data`` attributes.
+            # When unpickling a MaskedColumn, ``data`` will be a bare
+            # BaseColumn with none of the expected attributes.  In this case
+            # do NOT execute this block which initializes from ``data``
+            # attributes.
             self_data = np.asarray(data.data, dtype=dtype)
             if description is None:
                 description = data.description
@@ -145,15 +152,15 @@ class BaseColumn(np.ndarray):
         """
         Return a copy of the current instance.
 
-        If ``data`` is supplied then a view (reference) of ``data`` is used, and
-        ``copy_data`` is ignored.
+        If ``data`` is supplied then a view (reference) of ``data`` is used,
+        and ``copy_data`` is ignored.
 
         Parameters
         ----------
         order : {'C', 'F', 'A', 'K'}, optional
             Controls the memory layout of the copy. 'C' means C-order,
-            'F' means F-order, 'A' means 'F' if `a` is Fortran contiguous,
-            'C' otherwise. 'K' means match the layout of `a` as closely
+            'F' means F-order, 'A' means 'F' if ``a`` is Fortran contiguous,
+            'C' otherwise. 'K' means match the layout of ``a`` as closely
             as possible. (Note that this function and :func:numpy.copy are very
             similar, but have different default values for their order=
             arguments.)  Default is 'C'.
@@ -161,8 +168,8 @@ class BaseColumn(np.ndarray):
             If supplied then use a view of ``data`` instead of the instance
             data.  This allows copying the instance attributes and meta.
         copy_data : bool, optional
-            Make a copy of the internal numpy array instead of using a reference.
-            Default is True.
+            Make a copy of the internal numpy array instead of using a
+            reference.  Default is True.
 
         Returns
         -------
@@ -175,10 +182,14 @@ class BaseColumn(np.ndarray):
                 data = data.copy(order)
 
         # Create the new instance with all available kwargs.
-        kwargs = dict(name=self.name, data=data, unit=self.unit, format=self.format,
-                      description=self.description, meta=deepcopy(self.meta))
+        kwargs = dict(name=self.name, data=data, unit=self.unit,
+                      format=self.format, description=self.description,
+                      meta=deepcopy(self.meta))
+        # Use `kwargs.update` instead of `kwargs['fill_value'] =` since some
+        # versions of Python 2.6.x will blow up on unicode keyword arguments
         if hasattr(self, 'fill_value'):
-            kwargs['fill_value'] = self.fill_value
+            kwargs.update(fill_value=self.fill_value)
+
         out = self.__class__(**kwargs)
 
         self._copy_groups(out)
@@ -187,16 +198,17 @@ class BaseColumn(np.ndarray):
 
     def __setstate__(self, state):
         """
-        Restore the internal state of the Column/MaskedColumn for pickling purposes.  This
-        requires that the last element of ``state`` is a 5-tuple that has Column-specific
-        state values.
+        Restore the internal state of the Column/MaskedColumn for pickling
+        purposes.  This requires that the last element of ``state`` is a
+        5-tuple that has Column-specific state values.
         """
         # Get the Column attributes and meta
         name, unit, format, description, meta = state[-1]
         state = state[:-1]
 
-        # Using super(type(self), self).__setstate__() gives an infinite recursion.
-        # Manually call the right super class to actually set up the array object.
+        # Using super(type(self), self).__setstate__() gives an infinite
+        # recursion.  Manually call the right super class to actually set up
+        # the array object.
         super_class = ma.MaskedArray if isinstance(self, ma.MaskedArray) else np.ndarray
         super_class.__setstate__(self, state)
 
@@ -209,14 +221,16 @@ class BaseColumn(np.ndarray):
 
     def __reduce__(self):
         """
-        Return a 3-tuple for pickling a Column.  Use the super-class functionality but then
-        add in a 5-tuple of Column-specific values that get used in __setstate__.
+        Return a 3-tuple for pickling a Column.  Use the super-class
+        functionality but then add in a 5-tuple of Column-specific values
+        that get used in __setstate__.
         """
         super_class = ma.MaskedArray if isinstance(self, ma.MaskedArray) else np.ndarray
         reconstruct_func, reconstruct_func_args, state = super_class.__reduce__(self)
 
         # Define Column-specific attrs and meta that gets added to state.
-        column_state = (self.name, self.unit, self.format, self.description, self.meta)
+        column_state = (self.name, self.unit, self.format, self.description,
+                        self.meta)
         state = state + (column_state,)
 
         return reconstruct_func, reconstruct_func_args, state
@@ -293,17 +307,17 @@ class BaseColumn(np.ndarray):
         str_vals : iterator
             Column values formatted as strings
         """
-        # pprint._pformat_col_iter(col, max_lines, show_name, show_unit, outs)
         # Iterate over formatted values with no max number of lines, no column
         # name, no unit, and ignoring the returned header info in outs.
+        _pformat_col_iter = self._formatter._pformat_col_iter
         for str_val in _pformat_col_iter(self, -1, False, False, {}):
             yield str_val
 
     def attrs_equal(self, col):
         """Compare the column attributes of ``col`` to this object.
 
-        The comparison attributes are: name, unit, dtype, format, description,
-        and meta.
+        The comparison attributes are: ``name``, ``unit``, ``dtype``,
+        ``format``, ``description``, and ``meta``.
 
         Parameters
         ----------
@@ -316,21 +330,27 @@ class BaseColumn(np.ndarray):
             True if all attributes are equal
         """
         if not isinstance(col, BaseColumn):
-            raise ValueError('Comparison `col` must be a Column or MaskedColumn object')
+            raise ValueError('Comparison `col` must be a Column or '
+                             'MaskedColumn object')
 
         attrs = ('name', 'unit', 'dtype', 'format', 'description', 'meta')
         equal = all(getattr(self, x) == getattr(col, x) for x in attrs)
 
         return equal
 
+    @property
+    def _formatter(self):
+        return FORMATTER if (self.parent_table is None) else self.parent_table.formatter
+
     def pformat(self, max_lines=None, show_name=True, show_unit=False):
         """Return a list of formatted string representation of column values.
 
-        If no value of `max_lines` is supplied then the height of the screen
-        terminal is used to set `max_lines`.  If the terminal height cannot be
-        determined then the default will be determined using the
-        `astropy.table.pprint.MAX_LINES` configuration item. If a negative
-        value of `max_lines` is supplied then there is no line limit applied.
+        If no value of ``max_lines`` is supplied then the height of the
+        screen terminal is used to set ``max_lines``.  If the terminal
+        height cannot be determined then the default will be
+        determined using the ``astropy.conf.max_lines`` configuration
+        item. If a negative value of ``max_lines`` is supplied then
+        there is no line limit applied.
 
         Parameters
         ----------
@@ -349,17 +369,19 @@ class BaseColumn(np.ndarray):
             List of lines with header and formatted column values
 
         """
+        _pformat_col = self._formatter._pformat_col
         lines, n_header = _pformat_col(self, max_lines, show_name, show_unit)
         return lines
 
     def pprint(self, max_lines=None, show_name=True, show_unit=False):
         """Print a formatted string representation of column values.
 
-        If no value of `max_lines` is supplied then the height of the screen
-        terminal is used to set `max_lines`.  If the terminal height cannot be
-        determined then the default will be determined using the
-        `astropy.table.pprint.MAX_LINES` configuration item. If a negative
-        value of `max_lines` is supplied then there is no line limit applied.
+        If no value of ``max_lines`` is supplied then the height of the
+        screen terminal is used to set ``max_lines``.  If the terminal
+        height cannot be determined then the default will be
+        determined using the ``astropy.conf.max_lines`` configuration
+        item. If a negative value of ``max_lines`` is supplied then
+        there is no line limit applied.
 
         Parameters
         ----------
@@ -372,6 +394,7 @@ class BaseColumn(np.ndarray):
         show_unit : bool
             Include a header row for unit (default=False)
         """
+        _pformat_col = self._formatter._pformat_col
         lines, n_header = _pformat_col(self, max_lines, show_name, show_unit)
         for i, line in enumerate(lines):
             if i < n_header:
@@ -406,6 +429,7 @@ class BaseColumn(np.ndarray):
             Include a header row for unit (default=False)
 
         """
+        _more_tabcol = self._formatter._more_tabcol
         _more_tabcol(self, max_lines=max_lines, show_name=show_name,
                      show_unit=show_unit)
 
@@ -415,8 +439,8 @@ class BaseColumn(np.ndarray):
         The unit associated with this column.  May be a string or a
         `astropy.units.UnitBase` instance.
 
-        Setting the `unit` property does not change the values of the
-        data.  To perform a unit conversion, use `convert_unit_to`.
+        Setting the ``unit`` property does not change the values of the
+        data.  To perform a unit conversion, use ``convert_unit_to``.
         """
         return self._unit
 
@@ -452,7 +476,7 @@ class BaseColumn(np.ndarray):
         unit to the given unit.
 
         To change the unit associated with this column without
-        actually changing the data values, simply set the `unit`
+        actually changing the data values, simply set the ``unit``
         property.
 
         Parameters
@@ -485,12 +509,13 @@ class BaseColumn(np.ndarray):
         """
         Group this column by the specified ``keys``
 
-        This effectively splits the column into groups which correspond to unique values of
-        the ``keys`` grouping object.  The output is a new `Column` or `MaskedColumn` which
-        contains a copy of this column but sorted by row according to ``keys``.
+        This effectively splits the column into groups which correspond to
+        unique values of the ``keys`` grouping object.  The output is a new
+        `Column` or `MaskedColumn` which contains a copy of this column but
+        sorted by row according to ``keys``.
 
-        The ``keys`` input to `group_by` must be a numpy array with the same length as
-        this column.
+        The ``keys`` input to ``group_by`` must be a numpy array with the
+        same length as this column.
 
         Parameters
         ----------
@@ -514,8 +539,9 @@ class BaseColumn(np.ndarray):
         elif hasattr(self, '_groups'):
             out._groups = groups.ColumnGroups(out, indices=self._groups._indices)
 
-    # Strip off the BaseColumn-ness for repr and str so that MaskedColumn.data __repr__
-    # does not include masked_BaseColumn(data = [1 2], ...).
+    # Strip off the BaseColumn-ness for repr and str so that
+    # MaskedColumn.data __repr__ does not include masked_BaseColumn(data =
+    # [1 2], ...).
     def __repr__(self):
         return np.asarray(self).__repr__()
 
@@ -539,11 +565,11 @@ class Column(BaseColumn):
         Full description of column
     unit : str or None
         Physical unit
-    format : str or None or function
+    format : str or None or function or callable
         Format string for outputting column values.  This can be an
         "old-style" (``format % value``) or "new-style" (`str.format`)
-        format specification string or a function that accepts a single
-        value and returns a string.
+        format specification string or a function or any callable object that
+        accepts a single value and returns a string.
     meta : dict-like or None
         Meta-data associated with the column
 
@@ -586,7 +612,7 @@ class Column(BaseColumn):
 
     .. warning::
 
-       In the next major release of `astropy` (0.3), the order of function
+       In the next major release of ``astropy`` (0.3), the order of function
        arguments for creating a |Column| will change.  Currently the order is
        ``Column(name, data, ...)``, but in 0.3 and later it will be
        ``Column(data, name, ...)``.  This improves consistency with |Table| and
@@ -605,8 +631,8 @@ class Column(BaseColumn):
                 description=None, unit=None, format=None, meta=None,
                 dtypes=None, units=None):
 
-        if isinstance(data, MaskedColumn):
-            raise TypeError("Cannot convert a MaskedColumn to a Column")
+        if isinstance(data, MaskedColumn) and np.any(data.mask):
+            raise TypeError("Cannot convert a MaskedColumn with masked value to a Column")
 
         self = super(Column, cls).__new__(cls, data=data, name=name, dtype=dtype,
                                           shape=shape, length=length, description=description,
@@ -625,6 +651,7 @@ class Column(BaseColumn):
         return out
 
     def __unicode__(self):
+        _pformat_col = self._formatter._pformat_col
         lines, n_header = _pformat_col(self)
         return '\n'.join(lines)
     if six.PY3:
@@ -659,11 +686,11 @@ class MaskedColumn(Column, ma.MaskedArray):
         Full description of column
     unit : str or None
         Physical unit
-    format : str or None or function
+    format : str or None or function or callable
         Format string for outputting column values.  This can be an
         "old-style" (``format % value``) or "new-style" (`str.format`)
-        format specification string or a function that accepts a single
-        value and returns a string.
+        format specification string or a function or any callable object that
+        accepts a single value and returns a string.
     meta : dict-like or None
         Meta-data associated with the column
 
@@ -709,7 +736,7 @@ class MaskedColumn(Column, ma.MaskedArray):
 
     .. warning::
 
-       In the next major release of `astropy` (0.3), the order of function
+       In the next major release of ``astropy`` (0.3), the order of function
        arguments for creating a |MaskedColumn| will change.  Currently the order is
        ``MaskedColumn(name, data, ...)``, but in 0.3 and later it will be
        ``MaskedColumn(data, name, ...)``.  This improves consistency with |Table|
@@ -815,8 +842,9 @@ class MaskedColumn(Column, ma.MaskedArray):
         Parameters
         ----------
         fill_value : scalar; optional
-            The value to use for invalid entries (None by default).
-            If None, the `fill_value` attribute of the array is used instead.
+            The value to use for invalid entries (`None` by default).  If
+            `None`, the ``fill_value`` attribute of the array is used
+            instead.
 
         Returns
         -------
@@ -829,6 +857,9 @@ class MaskedColumn(Column, ma.MaskedArray):
         fill_value = self._fix_fill_value(fill_value)
 
         data = super(MaskedColumn, self).filled(fill_value)
-        out = Column(name=self.name, data=data, unit=self.unit, format=self.format,
-                     description=self.description, meta=deepcopy(self.meta))
+        # Use parent table definition of Column if available
+        column_cls = self.parent_table.Column if (self.parent_table is not None) else Column
+        out = column_cls(name=self.name, data=data, unit=self.unit,
+                         format=self.format, description=self.description,
+                         meta=deepcopy(self.meta))
         return out

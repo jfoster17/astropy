@@ -1,11 +1,16 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
+# TEST_UNICODE_LITERALS
+
+import copy
+
 try:
     from cStringIO import StringIO
 except ImportError:
     from io import StringIO
 
-from ... import ascii as asciitable
+from ... import ascii
+from .... import table
 
 from .common import setup_function, teardown_function
 
@@ -34,7 +39,7 @@ XCENTER YCENTER
 "        18.1" 280.2
 """
          ),
-    dict(kwargs=dict(Writer=asciitable.Rdb, exclude_names=['CHI']),
+    dict(kwargs=dict(Writer=ascii.Rdb, exclude_names=['CHI']),
          out="""\
 ID	XCENTER	YCENTER	MAG	MERR	MSKY	NITER	SHARPNESS	PIER	PERROR
 N	N	N	N	N	N	N	N	N	S
@@ -42,41 +47,41 @@ N	N	N	N	N	N	N	N	N	S
 18	18.114	280.170	22.329	0.206	30.12784	4	-2.544	0	No_error
 """
          ),
-    dict(kwargs=dict(Writer=asciitable.Tab),
+    dict(kwargs=dict(Writer=ascii.Tab),
          out="""\
 ID	XCENTER	YCENTER	MAG	MERR	MSKY	NITER	SHARPNESS	CHI	PIER	PERROR
 14	138.538	256.405	15.461	0.003	34.85955	4	-0.032	0.802	0	No_error
 18	18.114	280.170	22.329	0.206	30.12784	4	-2.544	1.104	0	No_error
 """
          ),
-    dict(kwargs=dict(Writer=asciitable.Csv),
+    dict(kwargs=dict(Writer=ascii.Csv),
          out="""\
 ID,XCENTER,YCENTER,MAG,MERR,MSKY,NITER,SHARPNESS,CHI,PIER,PERROR
 14,138.538,256.405,15.461,0.003,34.85955,4,-0.032,0.802,0,No_error
 18,18.114,280.170,22.329,0.206,30.12784,4,-2.544,1.104,0,No_error
 """
          ),
-    dict(kwargs=dict(Writer=asciitable.NoHeader),
+    dict(kwargs=dict(Writer=ascii.NoHeader),
          out="""\
 14 138.538 256.405 15.461 0.003 34.85955 4 -0.032 0.802 0 No_error
 18 18.114 280.170 22.329 0.206 30.12784 4 -2.544 1.104 0 No_error
 """
          ),
-    dict(kwargs=dict(Writer=asciitable.CommentedHeader),
+    dict(kwargs=dict(Writer=ascii.CommentedHeader),
          out="""\
 # ID XCENTER YCENTER MAG MERR MSKY NITER SHARPNESS CHI PIER PERROR
 14 138.538 256.405 15.461 0.003 34.85955 4 -0.032 0.802 0 No_error
 18 18.114 280.170 22.329 0.206 30.12784 4 -2.544 1.104 0 No_error
 """
          ),
-    dict(kwargs=dict(Writer=asciitable.CommentedHeader, comment='&'),
+    dict(kwargs=dict(Writer=ascii.CommentedHeader, comment='&'),
          out="""\
 &ID XCENTER YCENTER MAG MERR MSKY NITER SHARPNESS CHI PIER PERROR
 14 138.538 256.405 15.461 0.003 34.85955 4 -0.032 0.802 0 No_error
 18 18.114 280.170 22.329 0.206 30.12784 4 -2.544 1.104 0 No_error
 """
          ),
-    dict(kwargs=dict(Writer=asciitable.Latex),
+    dict(kwargs=dict(Writer=ascii.Latex),
          out="""\
 \\begin{table}
 \\begin{tabular}{ccccccccccc}
@@ -87,7 +92,7 @@ ID & XCENTER & YCENTER & MAG & MERR & MSKY & NITER & SHARPNESS & CHI & PIER & PE
 \\end{table}
 """
          ),
-    dict(kwargs=dict(Writer=asciitable.AASTex),
+    dict(kwargs=dict(Writer=ascii.AASTex),
          out="""\
 \\begin{deluxetable}{ccccccccccc}
 \\tablehead{\\colhead{ID} & \\colhead{XCENTER} & \\colhead{YCENTER} & \\colhead{MAG} & \\colhead{MERR} & \\colhead{MSKY} & \\colhead{NITER} & \\colhead{SHARPNESS} & \\colhead{CHI} & \\colhead{PIER} & \\colhead{PERROR}}
@@ -99,9 +104,9 @@ ID & XCENTER & YCENTER & MAG & MERR & MSKY & NITER & SHARPNESS & CHI & PIER & PE
 """
          ),
     dict(
-        kwargs=dict(Writer=asciitable.AASTex, caption='Mag values \\label{tab1}', latexdict={
+        kwargs=dict(Writer=ascii.AASTex, caption='Mag values \\label{tab1}', latexdict={
                     'units': {'MAG': '[mag]', 'XCENTER': '[pixel]'}, 'tabletype': 'deluxetable*',
-                    'tablealign':'htpb'}),
+                    'tablealign': 'htpb'}),
         out="""\
 \\begin{deluxetable*}{ccccccccccc}[htpb]
 \\tablecaption{Mag values \\label{tab1}}
@@ -114,10 +119,12 @@ ID & XCENTER & YCENTER & MAG & MERR & MSKY & NITER & SHARPNESS & CHI & PIER & PE
 """
     ),
     dict(
-        kwargs=dict(Writer=asciitable.Latex, caption='Mag values \\label{tab1}', latexdict={'preamble': '\\begin{center}', 'tablefoot': '\\end{center}', 'data_end': [
-                    '\\hline', '\\hline'], 'units':{'MAG': '[mag]', 'XCENTER': '[pixel]'},
+        kwargs=dict(Writer=ascii.Latex, caption='Mag values \\label{tab1}',
+                    latexdict={'preamble': '\\begin{center}', 'tablefoot': '\\end{center}',
+                               'data_end': ['\\hline', '\\hline'],
+                               'units':{'MAG': '[mag]', 'XCENTER': '[pixel]'},
                     'tabletype': 'table*',
-                    'tablealign': 'h'}, 
+                    'tablealign': 'h'},
                     col_align='|lcccccccccc|'),
         out="""\
 \\begin{table*}[h]
@@ -135,7 +142,7 @@ ID & XCENTER & YCENTER & MAG & MERR & MSKY & NITER & SHARPNESS & CHI & PIER & PE
 \\end{table*}
 """
     ),
-    dict(kwargs=dict(Writer=asciitable.Latex, latexdict=asciitable.latexdicts['template']),
+    dict(kwargs=dict(Writer=ascii.Latex, latexdict=ascii.latexdicts['template']),
          out="""\
 \\begin{tabletype}[tablealign]
 preamble
@@ -154,7 +161,62 @@ tablefoot
 \\end{tabletype}
 """
          ),
-    dict(kwargs=dict(Writer=asciitable.Ipac),
+    dict(kwargs=dict(Writer=ascii.HTML, htmldict={'css': 'table,th,td{border:1px solid black;'}),
+         out="""\
+<html>
+ <head>
+  <meta charset="utf-8"/>
+  <meta content="text/html;charset=UTF-8" http-equiv="Content-type"/>
+  <style>
+table,th,td{border:1px solid black;  </style>
+ </head>
+ <body>
+  <table>
+   <tr>
+    <th>ID</th>
+    <th>XCENTER</th>
+    <th>YCENTER</th>
+    <th>MAG</th>
+    <th>MERR</th>
+    <th>MSKY</th>
+    <th>NITER</th>
+    <th>SHARPNESS</th>
+    <th>CHI</th>
+    <th>PIER</th>
+    <th>PERROR</th>
+   </tr>
+   <tr>
+    <td>14</td>
+    <td>138.538</td>
+    <td>256.405</td>
+    <td>15.461</td>
+    <td>0.003</td>
+    <td>34.85955</td>
+    <td>4</td>
+    <td>-0.032</td>
+    <td>0.802</td>
+    <td>0</td>
+    <td>No_error</td>
+   </tr>
+   <tr>
+    <td>18</td>
+    <td>18.114</td>
+    <td>280.170</td>
+    <td>22.329</td>
+    <td>0.206</td>
+    <td>30.12784</td>
+    <td>4</td>
+    <td>-2.544</td>
+    <td>1.104</td>
+    <td>0</td>
+    <td>No_error</td>
+   </tr>
+  </table>
+ </body>
+</html>
+"""
+         ),
+    dict(kwargs=dict(Writer=ascii.Ipac),
          out="""\
 \\MERGERAD='INDEF'
 \\IRAF='NOAO/IRAFV2.10EXPORT'
@@ -192,8 +254,25 @@ tablefoot
 |     long|    double|    double|      double|        double|         double|  long|                 double|      double|  long|         char|
 |         |    pixels|    pixels|  magnitudes|    magnitudes|         counts|      |                       |            |      |      perrors|
 |     null|      null|      null|        null|          null|           null|  null|                   null|        null|  null|         null|
- 14        138.538    256.405    15.461       0.003          34.85955        4      -0.032                  0.802        0      No_error      
- 18        18.114     280.170    22.329       0.206          30.12784        4      -2.544                  1.104        0      No_error      
+ 14        138.538    256.405    15.461       0.003          34.85955        4      -0.032                  0.802        0      No_error
+ 18        18.114     280.170    22.329       0.206          30.12784        4      -2.544                  1.104        0      No_error
+"""
+         ),
+]
+
+test_defs_no_data = [
+    dict(kwargs=dict(Writer=ascii.Ipac),
+         out="""\
+\\ This is an example of a valid comment.
+\\ The 2nd data line is used to verify the exact column parsing
+\\ (unclear if this is a valid for the IPAC format)
+\\catalog='sao'
+\\date='Wed Sp 20 09:48:36 1995'
+\\mykeyword='Another way for defining keyvalue string'
+|    ra|   dec| sai|    v2|sptype|
+|double|double|long|double|  char|
+|  unit|  unit|unit|  unit|  ergs|
+|  null|  null|null|  null|  null|
 """
          ),
 ]
@@ -257,19 +336,52 @@ a b c
          ),
 ]
 
+test_def_masked_fill_value = [
+    dict(kwargs=dict(),
+         out="""\
+a b c
+-- 2 3
+1 1 --
+"""
+         ),
+    dict(kwargs=dict(fill_values=[('1', 'w'), (ascii.masked, 'X')]),
+         out="""\
+a b c
+X 2 3
+w w X
+"""
+         ),
+    dict(kwargs=dict(fill_values=[('1', 'w'), (ascii.masked, 'XXX')],
+                     formats={'a': '%4.1f'}),
+         out="""\
+a b c
+XXX 2 3
+1.0 w XXX
+"""
+         ),
+    dict(kwargs=dict(Writer=ascii.Csv),
+         out="""\
+a,b,c
+,2,3
+1,1,
+"""
+         ),
+]
+
 
 def check_write_table(test_def, table):
     out = StringIO()
-    asciitable.write(table, out, **test_def['kwargs'])
+    ascii.write(table, out, **test_def['kwargs'])
     print('Expected:\n%s' % test_def['out'])
     print('Actual:\n%s' % out.getvalue())
-    assert out.getvalue().splitlines() == test_def['out'].splitlines()
+    assert [x.strip() for x in out.getvalue().strip().splitlines()] == [
+        x.strip() for x in test_def['out'].strip().splitlines()]
 
 
 def check_write_table_via_table(test_def, table):
     out = StringIO()
 
-    test_def = test_def.copy()
+    test_def = copy.deepcopy(test_def)
     if 'Writer' in test_def['kwargs']:
         format = 'ascii.{0}'.format(test_def['kwargs']['Writer']._format_name)
         del test_def['kwargs']['Writer']
@@ -279,11 +391,12 @@ def check_write_table_via_table(test_def, table):
     table.write(out, format=format, **test_def['kwargs'])
     print('Expected:\n%s' % test_def['out'])
     print('Actual:\n%s' % out.getvalue())
-    assert out.getvalue().splitlines() == test_def['out'].splitlines()
+    assert [x.strip() for x in out.getvalue().strip().splitlines()] == [
+        x.strip() for x in test_def['out'].strip().splitlines()]
 
 
 def test_write_table():
-    table = asciitable.get_reader(Reader=asciitable.Daophot)
+    table = ascii.get_reader(Reader=ascii.Daophot)
     data = table.read('t/daophot.dat')
 
     for test_def in test_defs:
@@ -292,7 +405,28 @@ def test_write_table():
 
 
 def test_write_fill_values():
-    data = asciitable.read(tab_to_fill)
+    data = ascii.read(tab_to_fill)
 
     for test_def in test_defs_fill_value:
         check_write_table(test_def, data)
+
+
+def test_write_fill_masked_different():
+    '''see discussion in #2255'''
+    data = ascii.read(tab_to_fill)
+    data = table.Table(data, masked=True)
+    data['a'].mask = [True, False]
+    data['c'].mask = [False, True]
+
+    for test_def in test_def_masked_fill_value:
+        check_write_table(test_def, data)
+
+
+def test_write_no_data_ipac():
+    """Write an IPAC table that contains no data."""
+    table = ascii.get_reader(Reader=ascii.Ipac)
+    data = table.read('t/no_data_ipac.dat')
+
+    for test_def in test_defs_no_data:
+        check_write_table(test_def, data)
+        check_write_table_via_table(test_def, data)

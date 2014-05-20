@@ -7,28 +7,8 @@ core.py:
 :Copyright: Smithsonian Astrophysical Observatory (2010)
 :Author: Tom Aldcroft (aldcroft@head.cfa.harvard.edu)
 """
-##
-## Redistribution and use in source and binary forms, with or without
-## modification, are permitted provided that the following conditions are met:
-##     * Redistributions of source code must retain the above copyright
-##       notice, this list of conditions and the following disclaimer.
-##     * Redistributions in binary form must reproduce the above copyright
-##       notice, this list of conditions and the following disclaimer in the
-##       documentation and/or other materials provided with the distribution.
-##     * Neither the name of the Smithsonian Astrophysical Observatory nor the
-##       names of its contributors may be used to endorse or promote products
-##       derived from this software without specific prior written permission.
-##
-## THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-## ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-## WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-## DISCLAIMED. IN NO EVENT SHALL <COPYRIGHT HOLDER> BE LIABLE FOR ANY
-## DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-## (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-## LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-## ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-## (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-## SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+from __future__ import absolute_import, division, print_function
 
 import os
 import re
@@ -36,8 +16,15 @@ import csv
 import itertools
 import functools
 import numpy
+import warnings
+
+from ...extern import six
+from ...extern.six.moves import zip
+from ...extern.six.moves import cStringIO as StringIO
+from ...utils.exceptions import AstropyWarning
 
 from ...table import Table
+from ...utils.compat import ignored
 from ...utils.data import get_readable_fileobj
 from ...utils import OrderedDict
 from . import connect
@@ -45,59 +32,79 @@ from . import connect
 # Global dictionary mapping format arg to the corresponding Reader class
 FORMAT_CLASSES = {}
 
+class MaskedConstant(numpy.ma.core.MaskedConstant):
+    """A trivial extension of numpy.ma.masked
+
+    We want to be able to put the generic term ``masked`` into a dictionary.
+    In python 2.7 we can just use ``numpy.ma.masked``, but in python 3.1 and 3.2 that
+    is not hashable, see https://github.com/numpy/numpy/issues/4660
+    So, we need to extend it here with a hash value.
+    """
+    def __hash__(self):
+        '''All instances of this class shall have the same hash.'''
+        # Any large number will do.
+        return 1234567890
+
+masked = MaskedConstant()
 
 class InconsistentTableError(ValueError):
-    pass
+    """
+    Indicates that an input table is inconsistent in some way.
 
-# Python 3 compatibility tweaks.  Should work back through 2.4.
-try:
-    from cStringIO import StringIO
-except ImportError:
-    from io import StringIO
+    The default behavior of ``BaseReader`` is to throw an instance of
+    this class if a data row doesn't match the header.
+    """
 
-try:
-    next = next
-except NameError:
-    next = lambda x: x.next()
+class OptionalTableImportError(ImportError):
+    """
+    Indicates that a dependency for table reading is not present.
 
-try:
-    izip = itertools.izip
-except AttributeError:
-    izip = zip
-
-try:
-    long = long
-except NameError:
-    long = int
-
-try:
-    unicode = unicode
-except NameError:
-    unicode = str
+    An instance of this class is raised whenever an optional reader
+    with certain required dependencies cannot operate because of
+    an ImportError.
+    """
 
 
 class NoType(object):
-    pass
+    """
+    Superclass for ``StrType`` and ``NumType`` classes.
+
+    This class is the default type of ``Column`` and provides a base
+    class for other data types.
+    """
 
 
 class StrType(NoType):
-    pass
+    """
+    Indicates that a column consists of text data.
+    """
 
 
 class NumType(NoType):
-    pass
+    """
+    Indicates that a column consists of numerical data.
+    """
 
 
 class FloatType(NumType):
-    pass
+    """
+    Describes floating-point data.
+    """
 
 
 class IntType(NumType):
-    pass
+    """
+    Describes integer data.
+    """
 
 
 class AllType(StrType, FloatType, IntType):
-    pass
+    """
+    Subclass of all other data types.
+
+    This type is returned by ``convert_numpy`` if the given numpy
+    type does not match ``StrType``, ``FloatType``, or ``IntType``.
+    """
 
 
 class Column(object):
@@ -261,16 +268,20 @@ class DefaultSplitter(BaseSplitter):
         if self.process_line:
             lines = [self.process_line(x) for x in lines]
 
-        if self.delimiter == '\s':
+        # In Python 2.x the inputs to csv cannot be unicode.  In Python 3 these
+        # lines do nothing.
+        escapechar = None if self.escapechar is None else str(self.escapechar)
+        quotechar = None if self.quotechar is None else str(self.quotechar)
+        delimiter = None if self.delimiter is None else str(self.delimiter)
+
+        if delimiter == '\s':
             delimiter = ' '
-        else:
-            delimiter = self.delimiter
 
         csv_reader = csv.reader(lines,
                                 delimiter=delimiter,
                                 doublequote=self.doublequote,
-                                escapechar=self.escapechar,
-                                quotechar=self.quotechar,
+                                escapechar=escapechar,
+                                quotechar=quotechar,
                                 quoting=self.quoting,
                                 skipinitialspace=self.skipinitialspace
                                 )
@@ -281,17 +292,18 @@ class DefaultSplitter(BaseSplitter):
                 yield vals
 
     def join(self, vals):
-        if self.delimiter is None:
-            delimiter = ' '
-        else:
-            delimiter = self.delimiter
+
+        # In Python 2.x the inputs to csv cannot be unicode
+        escapechar = None if self.escapechar is None else str(self.escapechar)
+        quotechar = None if self.quotechar is None else str(self.quotechar)
+        delimiter = ' ' if self.delimiter is None else str(self.delimiter)
 
         if self.csv_writer is None:
             self.csv_writer = csv.writer(self.csv_writer_out,
                                          delimiter=delimiter,
                                          doublequote=self.doublequote,
-                                         escapechar=self.escapechar,
-                                         quotechar=self.quotechar,
+                                         escapechar=escapechar,
+                                         quotechar=quotechar,
                                          quoting=self.quoting,
                                          lineterminator='',
                                          )
@@ -364,7 +376,6 @@ class BaseHeader(object):
         the table ``lines`` and update the OrderedDict ``meta`` in place.  This base
         method does nothing.
         """
-        pass
 
     def get_cols(self, lines):
         """Initialize the header Column objects from the table ``lines``.
@@ -410,8 +421,8 @@ class BaseHeader(object):
 
     def write(self, lines):
         if self.start_line is not None:
-            for i, spacer_line in izip(range(self.start_line),
-                                       itertools.cycle(self.write_spacer_lines)):
+            for i, spacer_line in zip(range(self.start_line),
+                                      itertools.cycle(self.write_spacer_lines)):
                 lines.append(spacer_line)
             lines.append(self.splitter.join([x.name for x in self.cols]))
 
@@ -445,12 +456,17 @@ class BaseData(object):
     comment = None
     splitter_class = DefaultSplitter
     write_spacer_lines = ['ASCII_TABLE_WRITE_SPACER_LINE']
-    formats = {}
-    fill_values = []
     fill_include_names = None
     fill_exclude_names = None
 
     def __init__(self):
+        # Need to make sure fill_values list is instance attribute, not class attribute.
+        # On read, this will be overwritten by the default in the ui.read (thus, in
+        # the current implementation there can be no different default for different
+        # Readers). On write, ui.py does not specify a default, so this line here matters.
+        # Currently, the default matches the numpy default for masked values. 
+        self.fill_values = [(masked, '--')]
+        self.formats = {}
         self.splitter = self.__class__.splitter_class()
 
     def process_lines(self, lines):
@@ -510,12 +526,12 @@ class BaseData(object):
                     col.fill_values = {}
 
             # if input is only one <fill_spec>, then make it a list
-            try:
+            with ignored(TypeError):
                 self.fill_values[0] + ''
                 self.fill_values = [self.fill_values]
-            except TypeError:
-                pass
-            # Step 1: Set the default list of columns which are affected by fill_values
+
+            # Step 1: Set the default list of columns which are affected by
+            # fill_values
             colnames = set(self.header.colnames)
             if self.fill_include_names is not None:
                 colnames.intersection_update(self.fill_include_names)
@@ -555,6 +571,10 @@ class BaseData(object):
                 for i, str_val in ((i, x) for i, x in enumerate(col.str_vals)
                                    if x in col.fill_values):
                     col.str_vals[i] = col.fill_values[str_val]
+                if masked in col.fill_values and hasattr(col, 'mask'):
+                    mask_val = col.fill_values[masked]
+                    for i in col.mask.nonzero()[0]:
+                        col.str_vals[i] = mask_val
 
     def write(self, lines):
         if hasattr(self.start_line, '__call__'):
@@ -649,6 +669,12 @@ class BaseOutputter(object):
                     col.type = converter_type
                 except (TypeError, ValueError):
                     col.converters.pop(0)
+                except OverflowError:
+                    # Overflow during conversion (most likely an int that doesn't fit in native C long).
+                    # Put string at the top of the converters list for the next while iteration.
+                    warnings.warn("OverflowError converting to {0} for column {1}, using string instead."
+                                  .format(converter_type.__name__, col.name), AstropyWarning)
+                    col.converters.insert(0, convert_numpy(numpy.str))
                 except IndexError:
                     raise ValueError('Column %s failed to convert' % col.name)
 
@@ -707,11 +733,9 @@ class MetaBaseReader(type):
 
 
 def _is_number(x):
-    try:
+    with ignored(ValueError):
         x = float(x)
         return True
-    except ValueError:
-        pass
     return False
 
 
@@ -739,11 +763,19 @@ def _apply_include_exclude_names(table, names, include_names, exclude_names, str
                                  .format(name))
 
     if names is not None:
+        # Rename table column names to those passed by user
         if len(names) != len(table.colnames):
             raise ValueError('Length of names argument ({0}) does not match number'
                              ' of table columns ({1})'.format(len(names), len(table.colnames)))
-        for name, colname in zip(names, table.colnames):
-            table.rename_column(colname, name)
+
+        # Temporarily rename with names that are not in `names` or `table.colnames`.
+        # This ensures that rename succeeds regardless of existing names.
+        xxxs = 'x' * max(len(name) for name in list(names) + list(table.colnames))
+        for ii, colname in enumerate(table.colnames):
+            table.rename_column(colname, xxxs + str(ii))
+
+        for ii, name in enumerate(names):
+            table.rename_column(xxxs + str(ii), name)
 
     names = set(table.colnames)
     if include_names is not None:
@@ -755,6 +787,7 @@ def _apply_include_exclude_names(table, names, include_names, exclude_names, str
         table.remove_columns(remove_names)
 
 
+@six.add_metaclass(MetaBaseReader)
 class BaseReader(object):
     """Class providing methods to read and write an ASCII table using the specified
     header, data, inputter, and outputter instances.
@@ -768,7 +801,6 @@ class BaseReader(object):
     The default behavior is to raise an InconsistentTableError.
 
     """
-    __metaclass__ = MetaBaseReader
 
     names = None
     include_names = None
@@ -810,12 +842,10 @@ class BaseReader(object):
         # If ``table`` is a file then store the name in the ``data``
         # attribute. The ``table`` is a "file" if it is a string
         # without the new line specific to the OS.
-        try:
+        with ignored(TypeError):
+            # Strings only
             if os.linesep not in table + '':
                 self.data.table_name = os.path.basename(table)
-        except TypeError:
-            # Not a string.
-            pass
 
         # Same from __init__.  ??? Do these need to be here?
         self.data.header = self.header
@@ -908,8 +938,8 @@ class BaseReader(object):
                                      self.strict_names)
 
         # link information about the columns to the writer object (i.e. self)
-        self.header.cols = table.columns.values()
-        self.data.cols = table.columns.values()
+        self.header.cols = list(six.itervalues(table.columns))
+        self.data.cols = list(six.itervalues(table.columns))
 
         # Write header and data to lines list
         lines = []

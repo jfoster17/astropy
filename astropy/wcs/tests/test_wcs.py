@@ -1,5 +1,10 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
+
+# TEST_UNICODE_LITERALS
+
 from __future__ import absolute_import, division, print_function, unicode_literals
+
+from ...extern import six
 
 import os
 import sys
@@ -13,9 +18,8 @@ from ...tests.helper import raises, catch_warnings, pytest
 from ... import wcs
 from ...utils.data import (
     get_pkg_data_filenames, get_pkg_data_contents, get_pkg_data_filename)
-from ...tests.helper import pytest
 from ...utils.misc import NumpyRNGContext
-
+from ...utils.exceptions import AstropyDeprecationWarning
 
 try:
     import scipy  # pylint: disable=W0611
@@ -121,101 +125,6 @@ def test_spectra():
         # than it would have otherwise.
 
 
-def test_units():
-    u = wcs.UnitConverter("log(MHz)", "ln(Hz)")
-    print(u.convert([1, 2, 3, 4]))
-
-basic_units = "m s g rad sr K A mol cd".split()
-derived_units = "Hz J W V N Pa C Ohm ohm S F Wb T H lm lx".split()
-add_all_units = "eV Jy R G barn".split()
-add_sup_units = "a yr pc bit byte Byte".split()
-add_sub_units = "mag".split()
-general_units = (
-    "deg arcmin arcsec mas d h min erg Ry u D DEGREE DEGREES".split())
-astro_units = "Angstrom angstrom AU lyr beam solRad solMass solLum Sun".split()
-device_units = "adu bin chan count ct photon ph pixel pix voxel".split()
-
-sub_prefixes = "y z a f p n u m c d".split()
-sup_prefixes = "da h k M G T P E Z Y".split()
-
-
-def test_all_units():
-    def test_self(x):
-        # x appears in the test name. If we would have had an ambiguous
-        # test name, we had -xxx added to the unit name.  Remove it if
-        # necessary.
-        if '-' in x:
-            x = x.split('-')[0]
-
-        # here is the test:
-        try:
-            u = wcs.UnitConverter(x, x)
-        except ValueError:
-            e = sys.exc_info()[1]
-            if str(e).startswith("ERROR 12 in wcsutrne") and \
-                    x in ("S", "H", "D"):
-                return
-            else:
-                raise
-        assert u.scale == 1.0
-        assert u.offset == 0.0
-        assert u.power == 1.0
-
-    # list of all the units to test
-    all = sorted(basic_units + derived_units + add_all_units + add_sup_units
-                 + add_sub_units + general_units + astro_units + device_units)
-
-    # Pandokia has non-case-sensitve test names; since the unit name is
-    # showing up in the test name, we want to disambiguate any name collisions.
-    # Here is a list of all the lower-cased unit name names.
-    all_lower = [x.lower() for x in all]
-
-    # here are serial numbers to use to disambiguate
-    unique_tags = {}
-
-    for unit in all:
-        # disambiguate the test name, if necessary
-        l_unit = unit.lower()
-        if unit != l_unit and l_unit in all_lower:
-            n = unique_tags.get(l_unit, 1)
-            unique_tags[n] = n + 1
-
-            # the test will tear off the part after the '-'
-            unit = '%s-%d' % (unit, n)
-
-        # perform the test
-        yield test_self, unit
-
-
-def test_unit_prefixes():
-    def test_self(x, p):
-        unit = p + x
-        try:
-            u = wcs.UnitConverter(unit, unit)
-        except ValueError:
-            e = sys.exc_info()[1]
-            if str(e) == "Potentially unsafe translation" and \
-                    x in ("S", "H", "D"):
-                return
-            else:
-                raise
-        assert u.scale == 1.0
-        assert u.offset == 0.0
-        assert u.power == 1.0
-
-    for unit in (basic_units + derived_units + add_all_units):
-        for prefix in (sub_prefixes + sup_prefixes):
-            yield test_self, unit, prefix
-
-    for unit in add_sup_units:
-        for prefix in sup_prefixes:
-            yield test_self, unit, prefix
-
-    for unit in add_sub_units:
-        for prefix in sub_prefixes:
-            yield test_self, unit, prefix
-
-
 def test_fixes():
     """
     From github issue #36
@@ -254,19 +163,43 @@ def test_outside_sky():
     assert not np.any(np.isnan(w.wcs_pix2world([[1000., 1000.]], 0)))
 
 
+def test_pix2world():
+    """
+    From github issue #1463
+    """
+    # TODO: write this to test the expected output behavior of pix2world,
+    # currently this just makes sure it doesn't error out in unexpected ways
+    filename = get_pkg_data_filename('data/sip2.fits')
+    with catch_warnings(wcs.wcs.FITSFixedWarning) as caught_warnings:
+        # this raises a warning unimportant for this testing the pix2world
+        #   FITSFixedWarning(u'The WCS transformation has more axes (2) than the
+        #        image it is associated with (0)')
+        ww = wcs.WCS(filename)
+
+        # might as well monitor for changing behavior
+        assert len(caught_warnings) == 1
+
+    n = 3
+    pixels = (np.arange(n)*np.ones((2, n))).T
+    result = ww.wcs_pix2world(pixels, 0, ra_dec_order=True)
+
+    close_enough = 1e-8
+    # assuming that the data of sip2.fits doesn't change
+    answer = np.array([[0.00024976, 0.00023018],
+                       [0.00023043, -0.00024997]])
+
+    assert np.all(np.abs(ww.wcs.pc-answer) < close_enough)
+
+    answer = np.array([[ 202.39265216,   47.17756518],
+                       [ 202.39335826,   47.17754619],
+                       [ 202.39406436,   47.1775272 ]])
+
+    assert  np.all(np.abs(result-answer) < close_enough)
+
+
 def test_load_fits_path():
     fits = get_pkg_data_filename('data/sip.fits')
     w = wcs.WCS(fits)
-
-
-def test_backward_compatible():
-    fits = get_pkg_data_filename('data/sip.fits')
-    w = wcs.WCS(fits)
-
-    with NumpyRNGContext(123456789):
-        data = np.random.rand(100, 2)
-        assert np.all(w.wcs_pix2world(data, 0) == w.wcs_pix2sky(data, 0))
-        assert np.all(w.wcs_world2pix(data, 0) == w.wcs_sky2pix(data, 0))
 
 
 def test_dict_init():
@@ -308,7 +241,7 @@ def test_extra_kwarg():
     w = wcs.WCS()
     with NumpyRNGContext(123456789):
         data = np.random.rand(100, 2)
-        w.wcs_pix2sky(data, origin=1)
+        w.wcs_pix2world(data, origin=1)
 
 
 def test_3d_shapes():
@@ -318,9 +251,9 @@ def test_3d_shapes():
     w = wcs.WCS(naxis=3)
     with NumpyRNGContext(123456789):
         data = np.random.rand(100, 3)
-        result = w.wcs_pix2sky(data, 1)
+        result = w.wcs_pix2world(data, 1)
         assert result.shape == (100, 3)
-        result = w.wcs_pix2sky(
+        result = w.wcs_pix2world(
             data[..., 0], data[..., 1], data[..., 2], 1)
         assert len(result) == 3
 
@@ -422,7 +355,7 @@ def test_warning_about_defunct_keywords_exception():
 
 def test_to_header_string():
     header_string = """
-    WCSAXES =                    2 / Number of coordinate axes                      CRPIX1  =                    0 / Pixel coordinate of reference point            CRPIX2  =                    0 / Pixel coordinate of reference point            CDELT1  =                    1 / Coordinate increment at reference point        CDELT2  =                    1 / Coordinate increment at reference point        CRVAL1  =                    0 / Coordinate value at reference point            CRVAL2  =                    0 / Coordinate value at reference point            LATPOLE =                   90 / [deg] Native latitude of celestial pole        RESTFRQ =                    0 / [Hz] Line rest frequency                       RESTWAV =                    0 / [Hz] Line rest wavelength                      END"""
+    WCSAXES =                    2 / Number of coordinate axes                      CRPIX1  =                  0.0 / Pixel coordinate of reference point            CRPIX2  =                  0.0 / Pixel coordinate of reference point            CDELT1  =                  1.0 / Coordinate increment at reference point        CDELT2  =                  1.0 / Coordinate increment at reference point        CRVAL1  =                  0.0 / Coordinate value at reference point            CRVAL2  =                  0.0 / Coordinate value at reference point            LATPOLE =                 90.0 / [deg] Native latitude of celestial pole        END"""
 
     w = wcs.WCS()
     assert w.to_header_string().strip() == header_string.strip()
@@ -447,11 +380,19 @@ def test_find_all_wcs_crash():
 
 
 def test_validate():
-    results = wcs.validate(get_pkg_data_filename("data/validate.fits"))
-    results_txt = repr(results)
-    with open(get_pkg_data_filename("data/validate.txt"), "r") as fd:
-        assert set([x.strip() for x in fd.readlines()]) == set([
-            x.strip() for x in results_txt.splitlines()])
+    with catch_warnings():
+        results = wcs.validate(get_pkg_data_filename("data/validate.fits"))
+        results_txt = repr(results)
+        with open(get_pkg_data_filename("data/validate.txt"), "r") as fd:
+            assert set([x.strip() for x in fd.readlines()]) == set([
+                x.strip() for x in results_txt.splitlines()])
+
+
+def test_validate_with_2_wcses():
+    # From Issue #2053
+    results = wcs.validate(get_pkg_data_filename("data/2wcses.hdr"))
+
+    assert "WCS key 'A':" in six.text_type(results)
 
 
 @pytest.mark.skipif(str('not HAS_SCIPY'))
@@ -505,3 +446,130 @@ def test_unit_normalization():
         'data/unit.hdr', encoding='binary')
     w = wcs.WCS(header)
     assert w.wcs.cunit[2] == 'm/s'
+
+
+def test_footprint_to_file(tmpdir):
+    """
+    From github issue #1912
+    """
+    # Arbitrary keywords from real data
+    w = wcs.WCS({'CTYPE1': 'RA---ZPN', 'CRUNIT1': 'deg',
+                 'CRPIX1': -3.3495999e+02, 'CRVAL1': 3.185790700000e+02,
+                 'CTYPE2': 'DEC--ZPN', 'CRUNIT2': 'deg',
+                 'CRPIX2': 3.0453999e+03, 'CRVAL2': 4.388538000000e+01,
+                 'PV2_1': 1., 'PV2_3': 220.})
+    # Just check that this doesn't raise an exception:
+    w.footprint_to_file(str(tmpdir.join('test.txt')))
+
+
+def test_validate_faulty_wcs():
+    """
+    From github issue #2053
+    """
+    from ...io import fits
+    h = fits.Header()
+    # Illegal WCS:
+    h['RADESYSA'] = 'ICRS'
+    h['PV2_1'] = 1.0
+    hdu = fits.PrimaryHDU([[0]], header=h)
+    hdulist = fits.HDUList([hdu])
+    # Check that this doesn't raise a NameError exception:
+    wcs.validate(hdulist)
+
+
+def test_error_message():
+    header = get_pkg_data_contents(
+        'data/invalid_header.hdr', encoding='binary')
+
+    with pytest.raises(wcs.InvalidTransformError):
+        # Both lines are in here, because 0.4 calls .set within WCS.__init__,
+        # whereas 0.3 and earlier did not.
+        w = wcs.WCS(header, _do_set=False)
+        c = w.all_pix2world([[536.0, 894.0]], 0)
+
+
+def test_out_of_bounds():
+    # See #2107
+    header = get_pkg_data_contents('data/zpn-hole.hdr', encoding='binary')
+    w = wcs.WCS(header)
+
+    ra, dec = w.wcs_pix2world(110, 110, 0)
+
+    assert np.isnan(ra)
+    assert np.isnan(dec)
+
+    ra, dec = w.wcs_pix2world(0, 0, 0)
+
+    assert not np.isnan(ra)
+    assert not np.isnan(dec)
+
+
+def test_calc_footprint_1():
+    fits = get_pkg_data_filename('data/sip.fits')
+    w = wcs.WCS(fits)
+
+    axes = (1000, 1051)
+    ref = np.array([[ 202.39314493,   47.17753352],
+                    [ 202.71885939,   46.94630488],
+                    [ 202.94631893,   47.15855022],
+                    [ 202.72053428,   47.37893142]])
+    footprint = w.calc_footprint(axes=axes)
+    assert_allclose(footprint, ref)
+
+
+def test_calc_footprint_2():
+    """ Test calc_footprint without distortion. """
+    fits = get_pkg_data_filename('data/sip.fits')
+    w = wcs.WCS(fits)
+
+    axes = (1000, 1051)
+    ref = np.array([[ 202.39265216,   47.17756518],
+                    [ 202.7469062 ,   46.91483312],
+                    [ 203.11487481,   47.14359319],
+                    [ 202.76092671,   47.40745948]])
+    footprint = w.calc_footprint(axes=axes, undistort=False)
+    assert_allclose(footprint, ref)
+
+
+def test_calc_footprint_3():
+    """ Test calc_footprint with corner of the pixel."""
+    w = wcs.WCS()
+    w.wcs.ctype = ["GLON-CAR", "GLAT-CAR"]
+    w.wcs.crpix = [1.5, 5.5]
+    w.wcs.cdelt = [-0.1, 0.1]
+    axes = (2, 10)
+    ref = np.array([[0.1, -0.5],
+                    [0.1, 0.5],
+                    [359.9, 0.5],
+                    [359.9, -0.5]])
+
+    footprint = w.calc_footprint(axes=axes, undistort=False, center=False)
+    assert_allclose(footprint, ref)
+
+
+def test_sip():
+    # See #2107
+    header = get_pkg_data_contents('data/irac_sip.hdr', encoding='binary')
+    w = wcs.WCS(header)
+
+    x0, y0 = w.sip_pix2foc(200, 200, 0)
+
+    assert_allclose(72, x0, 1e-3)
+    assert_allclose(72, y0, 1e-3)
+
+    x1, y1 = w.sip_foc2pix(x0, y0, 0)
+
+    assert_allclose(200, x1, 1e-3)
+    assert_allclose(200, y1, 1e-3)
+
+def test_printwcs():
+    """
+    Just make sure that it runs
+    """
+    h = get_pkg_data_contents('spectra/orion-freq-1.hdr', encoding='binary')
+    w = wcs.WCS(h)
+    w.printwcs()
+    h = get_pkg_data_contents('data/3d_cd.hdr', encoding='binary')
+    w = wcs.WCS(h)
+    w.printwcs()
+

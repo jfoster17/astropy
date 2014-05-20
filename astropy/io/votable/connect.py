@@ -50,7 +50,7 @@ def read_table_votable(input, table_id=None, use_names_over_ids=False):
 
     Parameters
     ----------
-    input : str or `astropy.io.votable.tree.VOTableFile` or `astropy.io.votable.tree.Table`
+    input : str or `~astropy.io.votable.tree.VOTableFile` or `~astropy.io.votable.tree.Table`
         If a string, the filename to read the table from. If a
         :class:`~astropy.io.votable.tree.VOTableFile` or
         :class:`~astropy.io.votable.tree.Table` object, the object to extract
@@ -63,8 +63,8 @@ def read_table_votable(input, table_id=None, use_names_over_ids=False):
         the table in the file, starting at 0.
 
     use_names_over_ids : bool, optional
-        When `True` use the `name` attributes of columns as the names
-        of columns in the `astropy.table.Table` instance.  Since names
+        When `True` use the ``name`` attributes of columns as the names
+        of columns in the `~astropy.table.Table` instance.  Since names
         are not guaranteed to be unique, this may cause some columns
         to be renamed by appending numbers to the end.  Otherwise
         (default), use the ID attributes as the column names.
@@ -113,7 +113,8 @@ def read_table_votable(input, table_id=None, use_names_over_ids=False):
     return table.to_table(use_names_over_ids=use_names_over_ids)
 
 
-def write_table_votable(input, output, table_id=None, overwrite=False):
+def write_table_votable(input, output, table_id=None, overwrite=False,
+                        tabledata_format=None):
     """
     Write a Table object to an VO table file
 
@@ -121,13 +122,21 @@ def write_table_votable(input, output, table_id=None, overwrite=False):
     ----------
     input : Table
         The table to write out.
+
     output : str
         The filename to write the table to.
-    table_id : str
+
+    table_id : str, optional
         The table ID to use. If this is not specified, the 'ID' keyword in the
         ``meta`` object of the table will be used.
-    overwrite : bool
+
+    overwrite : bool, optional
         Whether to overwrite any existing file without warning.
+
+    tabledata_format : str, optional
+        The format of table data to write.  Must be one of ``tabledata``
+        (text representation), ``binary`` or ``binary2``.  Default is
+        ``tabledata``.  See :ref:`votable-serialization`.
     """
 
     # Check if output file already exists
@@ -141,7 +150,7 @@ def write_table_votable(input, output, table_id=None, overwrite=False):
     table_file = from_table(input, table_id=table_id)
 
     # Write out file
-    table_file.to_xml(output)
+    table_file.to_xml(output, tabledata_format=tabledata_format)
 
 
 io_registry.register_reader('votable', Table, read_table_votable)

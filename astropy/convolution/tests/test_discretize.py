@@ -1,4 +1,7 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
+
 import itertools
 
 import numpy as np
@@ -77,7 +80,7 @@ def test_gaussian_eval_2D(mode):
     model = Gaussian2D(1, 0, 0, 20, 20)
     x = np.arange(-100, 101)
     y = np.arange(-100, 101)
-    y, x = np.meshgrid(y, x)
+    x, y = np.meshgrid(x, y)
     values = model(x, y)
     disc_values = discretize_model(model, (-100, 101), (-100, 101), mode=mode)
     assert_allclose(values, disc_values, atol=0.001)

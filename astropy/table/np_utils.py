@@ -85,7 +85,7 @@ def get_col_name_map(arrays, common_names, uniq_col_name='{col_name}_{table_name
     col_name_count = _counter(col_name_list)
     repeated_names = [name for name, count in six.iteritems(col_name_count) if count > 1]
     if repeated_names:
-        raise TableMergeError('Merging column names resulted in duplicates: {0:s}.  '
+        raise TableMergeError('Merging column names resulted in duplicates: {0}.  '
                               'Change uniq_col_name or table_names args to fix this.'
                               .format(repeated_names))
 
@@ -109,8 +109,17 @@ def get_descrs(arrays, col_name_map):
         # List of input arrays that contribute to this output column
         in_cols = [arr[name] for arr, name in izip(arrays, in_names) if name is not None]
 
+        # List of names of the columns that contribute to this output column.
+        names = [name for name in in_names if name is not None]
+
         # Output dtype is the superset of all dtypes in in_arrays
-        dtype = common_dtype(in_cols)
+        try:
+            dtype = common_dtype(in_cols)
+        except TableMergeError as tme:
+            # Beautify the error message when we are trying to merge columns with incompatible
+            # types by including the name of the columns that originated the error.
+            raise TableMergeError("The '{0}' columns have incompatible types: {1}"
+                                  .format(names[0], tme._incompat_types))
 
         # Make sure all input shapes are the same
         uniq_shapes = set(col.shape[1:] for col in in_cols)
@@ -134,8 +143,12 @@ def common_dtype(cols):
     uniq_types = set(tuple(issubclass(col.dtype.type, np_type) for np_type in np_types)
                      for col in cols)
     if len(uniq_types) > 1:
-        raise TableMergeError('Columns have incompatible types {0}'
-                              .format([col.dtype.name for col in cols]))
+        # Embed into the exception the actual list of incompatible types.
+        incompat_types = [col.dtype.name for col in cols]
+        tme = TableMergeError('Columns have incompatible types {0}'
+                              .format(incompat_types))
+        tme._incompat_types = incompat_types
+        raise tme
 
     arrs = [np.empty(1, dtype=col.dtype) for col in cols]
 
