@@ -184,10 +184,29 @@ class Csv(Basic):
 
     def __init__(self):
         core.BaseReader.__init__(self)
+        #self.Reader=None
+        self.data.splitter.delimiter = ','
+        self.header.splitter.delimiter = ','
+        #self.header.start_line = 0
+        #self.data.start_line = 1 
+
+    def read(self,table=None,**kwargs):
+        import ui
+        Reader = ui._get_format_class(kwargs.get('format'), kwargs.get('Reader'), 'Reader')
+        print(Reader)
+        print(kwargs)
+        if Reader is not None:
+            kwargs['Reader'] = None
+        print("I am in the new reader")
+        ui.read(table,guess=True,**kwargs)
+
+
+    def write(self, table=None):
         self.data.splitter.delimiter = ','
         self.header.splitter.delimiter = ','
         self.header.start_line = 0
         self.data.start_line = 1 
+        return core.BaseReader.write(self, table=table)
 
 class Rdb(Tab):
     """Read a tab-separated file with an extra line after the column definition
